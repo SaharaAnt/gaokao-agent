@@ -1,0 +1,120 @@
+﻿<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>上海高考作文 AI Agent</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;900&family=ZCOOL+KuaiLe&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="bg-particles" id="particles"></div>
+
+  <header class="hero">
+    <div class="hero-content">
+      <div class="hero-badge">上海高考 · 2000-2025</div>
+      <h1 class="hero-title">哲学思维<br/>知识导航</h1>
+      <p class="hero-subtitle">25年高考作文核心哲学概念 · 交互式学习卡片</p>
+      <div class="hero-stats">
+        <div class="stat"><span class="stat-number" data-target="26">0</span><span class="stat-label">年真题</span></div>
+        <div class="stat"><span class="stat-number" data-target="6">0</span><span class="stat-label">哲学体系</span></div>
+        <div class="stat"><span class="stat-number" data-target="18">0</span><span class="stat-label">核心概念</span></div>
+        <div class="stat"><span class="stat-number" data-target="9">0</span><span class="stat-label">思维模型</span></div>
+      </div>
+    </div>
+  </header>
+
+  <nav class="category-nav" id="categoryNav">
+    <div class="nav-inner">
+      <button class="nav-btn active" data-category="all">全部</button>
+      <button class="nav-btn" data-category="dialectics">⚖️ 辩证法</button>
+      <button class="nav-btn" data-category="epistemology">🧠 认识论</button>
+      <button class="nav-btn" data-category="axiology">💎 价值论</button>
+      <button class="nav-btn" data-category="ethics">🤝 伦理学</button>
+      <button class="nav-btn" data-category="other">🎨 其他</button>
+      <button class="nav-btn" data-category="thinking">🦴 思维模型</button>
+    </div>
+  </nav>
+
+  <main class="cards-container" id="cardsContainer"></main>
+
+  <section class="agent-section" id="agentWorkbench">
+    <div class="agent-header">
+      <h2 class="section-title">作文题 AI Agent 工作台</h2>
+      <p class="agent-subtitle">输入题目后，生成审题策略、防跑题检查与评分报告</p>
+    </div>
+
+    <div class="agent-panel">
+      <label class="agent-label" for="essayTopicInput">作文题目（或关键词）</label>
+      <textarea id="essayTopicInput" class="agent-textarea" placeholder="例如：一个人乐意去探索陌生世界，仅仅是因为好奇心吗？"></textarea>
+
+      <div class="agent-actions">
+        <button id="analyzeTopicBtn" class="agent-btn primary">分析题目</button>
+        <button id="sampleTopicBtn" class="agent-btn ghost">填充示例</button>
+        <button id="randomTopicBtn" class="agent-btn ghost">一键抽题训练</button>
+        <button id="showDemoCardBtn" class="agent-btn ghost">加载示范题卡</button>
+        <button id="copyAgentResultBtn" class="agent-btn ghost">复制结果</button>
+      </div>
+
+      <div class="essay-library">
+        <div class="essay-library-title">范文列表</div>
+        <div class="essay-filter-bar" id="essayFilterBar"></div>
+        <div class="essay-library-list" id="essaySampleList"></div>
+      </div>
+
+      <label class="agent-label draft-label" for="essayDraftInput">作文草稿（用于评分与防跑题检查）</label>
+      <textarea id="essayDraftInput" class="agent-textarea draft" placeholder="把草稿粘贴在这里"></textarea>
+
+      <div class="exam-mode-panel" id="examModePanel">
+        <div class="exam-mode-header">
+          <h3>考场模式（25分钟 / 800字）</h3>
+          <span class="exam-mode-badge" id="examModeStatus">未开始</span>
+        </div>
+        <div class="exam-mode-controls">
+          <button id="startExamModeBtn" class="agent-btn primary">开始计时</button>
+          <button id="pauseExamModeBtn" class="agent-btn ghost">暂停</button>
+          <button id="resetExamModeBtn" class="agent-btn ghost">重置</button>
+        </div>
+        <div class="exam-mode-stats">
+          <div class="exam-stat"><span class="exam-stat-label">剩余时间</span><strong id="examCountdown">25:00</strong></div>
+          <div class="exam-stat"><span class="exam-stat-label">当前字数</span><strong id="examWordCount">0 / 800</strong></div>
+        </div>
+      </div>
+
+      <div class="agent-actions secondary">
+        <button id="offTopicCheckBtn" class="agent-btn ghost">防跑题检查</button>
+        <button id="scoreDraftBtn" class="agent-btn primary">草稿评分</button>
+      </div>
+
+      <div id="agentResult" class="agent-result" aria-live="polite">
+        <p class="agent-empty">输入题目后，这里会生成结果。</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="timeline-section" id="timeline">
+    <h2 class="section-title">命题演变总览</h2>
+    <div id="evolutionOverview" class="evolution-overview"></div>
+
+    <h2 class="section-title">25年命题演进时间线</h2>
+    <div class="timeline-filters">
+      <select id="timelineYearFilter" class="timeline-select">
+        <option value="all">全部年份</option>
+      </select>
+      <select id="timelineTypeFilter" class="timeline-select">
+        <option value="all">全部题型</option>
+        <option value="问题式命题">问题式命题</option>
+        <option value="关系辩证题">关系辩证题</option>
+        <option value="价值判断题">价值判断题</option>
+      </select>
+      <span id="timelineFilterSummary" class="timeline-filter-summary"></span>
+    </div>
+    <div class="timeline" id="timelineContainer"></div>
+  </section>
+
+  <script src="data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
