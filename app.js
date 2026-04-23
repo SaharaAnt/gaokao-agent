@@ -4,6 +4,7 @@ const ESSAY_FAVORITES_STORAGE_KEY = 'gaokao_essay_favorites_v1';
 const TRAINING_STATS_STORAGE_KEY = 'gaokao_training_stats_v1';
 const PATH_TRAINING_STORAGE_KEY = 'gaokao_path_training_v1';
 const ERROR_BOOK_STORAGE_KEY = 'gaokao_error_book_v1';
+const MATERIAL_CARD_STORAGE_KEY = 'gaokao_material_cards_v1';
 const TRAINING_SESSION_LIMIT = 120;
 
 const TIMELINE_SCORE_GUIDE = {
@@ -297,6 +298,11 @@ function initAgentWorkbench() {
   const resultContainer = document.getElementById('agentResult');
   const essayFilterBar = document.getElementById('essayFilterBar');
   const essaySampleList = document.getElementById('essaySampleList');
+  const materialTitleInput = document.getElementById('materialTitleInput');
+  const materialBodyInput = document.getElementById('materialBodyInput');
+  const createMaterialCardBtn = document.getElementById('createMaterialCardBtn');
+  const clearMaterialInputBtn = document.getElementById('clearMaterialInputBtn');
+  const materialCardList = document.getElementById('materialCardList');
   const examCountdown = document.getElementById('examCountdown');
   const examWordCount = document.getElementById('examWordCount');
   const startExamModeBtn = document.getElementById('startExamModeBtn');
@@ -310,6 +316,7 @@ function initAgentWorkbench() {
 
   renderEssayFilterBar(essayFilterBar, uiState.activeFilter, uiState.favorites);
   renderEssaySampleList(essaySampleList, uiState.activeFilter, uiState.favorites);
+  renderMaterialCardList(materialCardList);
   updateExamWordCountDisplay(draftInput, examWordCount);
   renderExamCountdown(examCountdown, examState.remaining);
 
@@ -424,6 +431,52 @@ function initAgentWorkbench() {
     draftInput.value = sample.content;
     updateExamWordCountDisplay(draftInput, examWordCount);
     resultContainer.innerHTML = '<p class="agent-empty">已加载范文，可直接点击“防跑题检查”或“草稿评分”。</p>';
+  });
+
+  createMaterialCardBtn?.addEventListener('click', () => {
+    const title = (materialTitleInput?.value || '').trim();
+    const body = (materialBodyInput?.value || '').trim();
+    if (!title || !body) {
+      resultContainer.innerHTML = '<p class="agent-empty">请先粘贴文章标题和正文，再生成素材卡。</p>';
+      return;
+    }
+    const card = createMaterialCardFromArticle(title, body);
+    const saved = saveMaterialCard(card);
+    renderMaterialCardList(materialCardList);
+    resultContainer.innerHTML = renderMaterialCardCreatedReport(saved);
+  });
+
+  clearMaterialInputBtn?.addEventListener('click', () => {
+    if (materialTitleInput) materialTitleInput.value = '';
+    if (materialBodyInput) materialBodyInput.value = '';
+    resultContainer.innerHTML = '<p class="agent-empty">已清空素材卡导入框。</p>';
+  });
+
+  materialCardList?.addEventListener('click', (e) => {
+    const useBtn = e.target.closest('.material-card-use');
+    if (useBtn) {
+      const card = findMaterialCardById(useBtn.dataset.cardId || '');
+      if (!card) return;
+      if (casePoolSelect) casePoolSelect.value = 'mycards';
+      if (card.topic && !topicInput.value.trim()) topicInput.value = card.topic;
+      resultContainer.innerHTML = renderMaterialCardDetail(card);
+      return;
+    }
+    const trainBtn = e.target.closest('.material-card-train');
+    if (trainBtn) {
+      const card = findMaterialCardById(trainBtn.dataset.cardId || '');
+      if (!card) return;
+      topicInput.value = card.topic || card.title || '';
+      renderAgentResult(analyzeEssayTopic(topicInput.value), resultContainer);
+      document.getElementById('agentWorkbench')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return;
+    }
+    const delBtn = e.target.closest('.material-card-delete');
+    if (delBtn) {
+      deleteMaterialCard(delBtn.dataset.cardId || '');
+      renderMaterialCardList(materialCardList);
+      resultContainer.innerHTML = '<p class="agent-empty">已删除这张素材卡。</p>';
+    }
   });
 
   resultContainer.addEventListener('click', (e) => {
@@ -1431,7 +1484,7 @@ function applyTriadEnhancement(draft, analysis) {
 }
 
 function buildEssayTemplateByType(topic, key, key2, topicType, casePool) {
-  const material = pickCaseMaterial(casePool, topicType);
+  const material = pickCaseMaterial(casePool, topicType, topic);
   const relationIntro = `面对“${topic}”，最容易出现的写法是迅速表态，但这往往会让论证停在直觉层面。`;
   const baseDefine = `我更倾向于先界定“${key}”的含义，再讨论它在何种前提下成立、在何种情境下需要修正。`;
   if (topicType === 'relation') {
@@ -1524,11 +1577,15 @@ function buildEssayTemplateByType(topic, key, key2, topicType, casePool) {
 
 function getSelectedCasePool(selectEl) {
   const val = (selectEl?.value || 'auto').trim();
-  const allow = ['auto', 'tech', 'edu', 'culture', 'society'];
+  const allow = ['auto', 'tech', 'edu', 'culture', 'society', 'mycards'];
   return allow.includes(val) ? val : 'auto';
 }
 
-function pickCaseMaterial(casePool, topicType) {
+function pickCaseMaterial(casePool, topicType, topic = '') {
+  if (casePool === 'mycards') {
+    const card = pickMaterialCardForTopic(topic, topicType);
+    if (card) return materialFromCard(card);
+  }
   const poolMap = {
     tech: {
       domain: '科技创新',
@@ -1556,6 +1613,188 @@ function pickCaseMaterial(casePool, topicType) {
     ? poolMap.society
     : (topicType === 'relation' ? poolMap.culture : poolMap.edu);
   return autoByType;
+}
+
+function loadMaterialCards() {
+  try {
+    const raw = localStorage.getItem(MATERIAL_CARD_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed)
+      ? parsed.filter((item) => item && typeof item === 'object' && item.id && item.title).slice(-80)
+      : [];
+  } catch (_) {
+    return [];
+  }
+}
+
+function writeMaterialCards(cards) {
+  try { localStorage.setItem(MATERIAL_CARD_STORAGE_KEY, JSON.stringify((cards || []).slice(-80))); } catch (_) {}
+}
+
+function saveMaterialCard(card) {
+  const cards = loadMaterialCards();
+  const normalized = {
+    ...card,
+    id: card.id || `card-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    createdAt: card.createdAt || Date.now()
+  };
+  const next = cards.filter((item) => item.id !== normalized.id);
+  next.push(normalized);
+  writeMaterialCards(next);
+  return normalized;
+}
+
+function findMaterialCardById(id) {
+  return loadMaterialCards().find((card) => card.id === id) || null;
+}
+
+function deleteMaterialCard(id) {
+  writeMaterialCards(loadMaterialCards().filter((card) => card.id !== id));
+}
+
+function createMaterialCardFromArticle(title, body) {
+  const cleanTitle = String(title || '').trim();
+  const cleanBody = String(body || '').replace(/\r/g, '').replace(/\n{3,}/g, '\n\n').trim();
+  const sentences = splitSentences(cleanBody).map((s) => ensureSentenceEnding(s)).filter((s) => s.length >= 8);
+  const lines = cleanBody.split(/\n+/).map((x) => x.trim()).filter(Boolean);
+  const topic = extractArticleTopic(cleanTitle, cleanBody);
+  const typeInfo = detectTopicType(topic || cleanTitle);
+  const thesis = extractArticleThesis(sentences, topic);
+  const structure = extractArticleStructure(lines, sentences);
+  const materials = extractArticleMaterials(sentences);
+  const goldenSentences = extractArticleGoldenSentences(sentences);
+  const tags = dedupeArray([
+    typeInfo.name,
+    ...inferMaterialTags(`${cleanTitle}\n${cleanBody}`),
+    topic ? '含作文题' : '待补题目'
+  ]).slice(0, 6);
+
+  return {
+    id: `card-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    title: cleanTitle,
+    topic: topic || cleanTitle,
+    thesis,
+    structure,
+    materials,
+    goldenSentences,
+    tags,
+    source: '公众号文章导入',
+    wordCount: countWords(cleanBody),
+    createdAt: Date.now()
+  };
+}
+
+function extractArticleTopic(title, body) {
+  const text = `${title}\n${body}`;
+  const quoted = text.match(/[“《](.{8,90}?)(?:[”》])/);
+  if (quoted && /(吗|？|怎样|如何|是否|对此|谈谈|请|有怎样的思考|认识)/.test(quoted[1])) return quoted[1].trim();
+  const lines = text.split(/\n+/).map((x) => x.trim()).filter(Boolean);
+  const hit = lines.find((line) => /(作文题|题目|原题|材料|请写一篇|谈谈|对此|你怎么看|有怎样的思考)/.test(line) && line.length <= 140);
+  if (hit) return hit.replace(/^(作文题|题目|原题|材料)[:：\s]*/, '').replace(/要求[:：].*$/, '').trim();
+  const titleTopic = title.replace(/【.*?】/g, '').replace(/\d+\.?\s*/, '').trim();
+  return titleTopic.slice(0, 80);
+}
+
+function extractArticleThesis(sentences, topic) {
+  const candidates = sentences.filter((s) => /(中心|立意|关键|核心|主张|我认为|本文|高分|不在于|而在于|并非|不是.*而是|应当|需要)/.test(s));
+  const picked = candidates.sort((a, b) => scoreMaterialSentence(b, topic) - scoreMaterialSentence(a, topic))[0]
+    || sentences.find((s) => s.length >= 24 && s.length <= 110)
+    || '本文的核心论点需要结合题目进一步提炼。';
+  return picked;
+}
+
+function extractArticleStructure(lines, sentences) {
+  const marked = lines.filter((line) => /^(首先|其次|再次|最后|第一|第二|第三|开头|主体|结尾|分论点|一、|二、|三、)/.test(line)).slice(0, 5);
+  const source = marked.length ? marked : sentences.filter((s) => /(首先|其次|进一步|然而|因此|回到题目|结尾|分论点)/.test(s)).slice(0, 5);
+  const result = source.map((x) => summarizeSentence(x, 48)).filter(Boolean);
+  while (result.length < 3) {
+    const fallback = ['开头：界定题眼并亮出中心论点。', '主体：用分论点推进，例证后补机制分析。', '结尾：回扣题目，给出边界与升华。'][result.length];
+    result.push(fallback);
+  }
+  return dedupeArray(result).slice(0, 5);
+}
+
+function extractArticleMaterials(sentences) {
+  return dedupeArray(sentences
+    .filter((s) => /(例如|比如|以.*为例|从.*到|素材|现实|当下|社会|校园|时代|技术|算法|文化|戏曲|航天|城市|社区|青年|教育)/.test(s))
+    .map((s) => summarizeSentence(s, 70)))
+    .slice(0, 5);
+}
+
+function extractArticleGoldenSentences(sentences) {
+  return dedupeArray(sentences
+    .filter((s) => s.length >= 18 && s.length <= 100)
+    .filter((s) => /(不是.*而是|并非|关键|本质|价值|机制|边界|前提|因此|然而|真正|只有|才能)/.test(s))
+    .sort((a, b) => scoreMaterialSentence(b, '') - scoreMaterialSentence(a, ''))
+    .map((s) => summarizeSentence(s, 86)))
+    .slice(0, 6);
+}
+
+function inferMaterialTags(text) {
+  const tags = [];
+  if (/(是否|吗|为什么|如何|怎样)/.test(text)) tags.push('问题式命题');
+  if (/(与|和|关系|之间|对立|统一|平衡)/.test(text)) tags.push('关系辩证题');
+  if (/(价值|认可|高下|意义|值得|标准)/.test(text)) tags.push('价值判断题');
+  if (/(科技|AI|算法|大模型|技术)/i.test(text)) tags.push('科技创新');
+  if (/(文化|传统|传播|戏曲|文学|经典)/.test(text)) tags.push('文化传播');
+  if (/(教育|学习|学校|学生|成长)/.test(text)) tags.push('教育成长');
+  if (/(社会|治理|公共|城市|社区)/.test(text)) tags.push('社会治理');
+  return tags;
+}
+
+function scoreMaterialSentence(sentence, topic) {
+  const s = String(sentence || '');
+  let score = 0;
+  if (topic && s.includes(topic.slice(0, 4))) score += 18;
+  score += countMatches(s, /(因此|然而|本质|关键|机制|价值|边界|前提|不是|而是|并非)/g) * 8;
+  score += countMatches(s, /(例如|比如|现实|当下|时代|社会)/g) * 5;
+  if (s.length >= 24 && s.length <= 80) score += 12;
+  if (/(我们要|必须要|显而易见|毋庸置疑)/.test(s)) score -= 12;
+  return score;
+}
+
+function summarizeSentence(sentence, maxLen) {
+  const s = ensureSentenceEnding(String(sentence || '').replace(/\s+/g, ' ').trim());
+  return s.length > maxLen ? `${s.slice(0, maxLen - 1)}…` : s;
+}
+
+function materialFromCard(card) {
+  const material = (card.materials || [])[0] || (card.goldenSentences || [])[0] || card.thesis || card.title;
+  const link = card.thesis || (card.goldenSentences || [])[0] || '素材卡提供了可借鉴的论证角度';
+  return {
+    domain: `我的素材卡：${card.title}`,
+    example: material,
+    link,
+    card
+  };
+}
+
+function pickMaterialCardForTopic(topic, topicType) {
+  const cards = loadMaterialCards();
+  if (!cards.length) return null;
+  const text = String(topic || '');
+  const typeName = typeof topicType === 'string' ? topicType : (topicType?.name || '');
+  return [...cards].sort((a, b) => scoreMaterialCard(b, text, typeName) - scoreMaterialCard(a, text, typeName))[0] || null;
+}
+
+function scoreMaterialCard(card, topic, typeName) {
+  const hay = `${card.title || ''} ${card.topic || ''} ${(card.tags || []).join(' ')} ${card.thesis || ''}`;
+  const typeAlias = {
+    relation: ['关系辩证型', '关系辩证题'],
+    value: ['价值判断型', '价值判断题'],
+    method: ['方法路径型', '问题式命题'],
+    phenomenon: ['现象思辨型', '问题式命题']
+  };
+  const expectedTypes = typeAlias[typeName] || [typeName];
+  let score = 0;
+  extractTopicPhrases(topic).forEach((p) => { if (p && hay.includes(p)) score += 10; });
+  if (expectedTypes.some((name) => name && (card.tags || []).includes(name))) score += 18;
+  if (/(文化|传播|经典|传统)/.test(topic) && (card.tags || []).includes('文化传播')) score += 10;
+  if (/(科技|AI|算法|创新)/i.test(topic) && (card.tags || []).includes('科技创新')) score += 10;
+  if (/(教育|学习|成长|学生)/.test(topic) && (card.tags || []).includes('教育成长')) score += 10;
+  const ageDays = Math.floor((Date.now() - Number(card.createdAt || 0)) / (24 * 60 * 60 * 1000));
+  score += Math.max(0, 8 - Math.min(8, ageDays));
+  return score;
 }
 
 function insertTemplateSentenceAtParagraph(draft, sentence, paragraphNo) {
@@ -2346,6 +2585,10 @@ function runBaselineHealthCheck() {
     'scoreDraftBtn',
     'improveDraftBtn',
     'weeklyDashboardBtn',
+    'materialTitleInput',
+    'materialBodyInput',
+    'createMaterialCardBtn',
+    'materialCardList',
     'regressionTestBtn',
     'baselineCheckBtn',
     'agentResult'
@@ -2524,6 +2767,18 @@ function runFeatureFlowChecks() {
     checks.push({ name: '周训练看板生成', ok: false, detail: `异常：${err?.message || '未知错误'}` });
   }
 
+  try {
+    const card = createMaterialCardFromArticle('【王老师教作文67】佳作评析', '作文题：一个人乐意去探索陌生世界，仅仅是因为好奇心吗？中心立意：探索并非只来自好奇心，而来自责任、问题意识与价值追求。首先界定好奇心，其次分析责任感，最后回到现实。比如科学家面对疾病难题持续研究，这说明探索需要公共责任。真正的探索不是浅层尝鲜，而是把未知转化为新的理解。');
+    const ok = !!card.topic && !!card.thesis && card.structure.length >= 3 && card.goldenSentences.length >= 1;
+    checks.push({
+      name: '素材卡提取',
+      ok,
+      detail: ok ? '可从标题和正文提取题目、论点、结构、金句' : '素材卡字段提取不足'
+    });
+  } catch (err) {
+    checks.push({ name: '素材卡提取', ok: false, detail: `异常：${err?.message || '未知错误'}` });
+  }
+
   return checks;
 }
 
@@ -2643,6 +2898,7 @@ function buildBaselineFixSuggestion(name) {
   if (name === '本地存储读写') return '关闭无痕模式后重试，或检查浏览器隐私策略。';
   if (name === '脚本版本一致性') return '统一 data.js / app.js 的 ?v 参数。';
   if (name === '回归测试样例') return '优先检查 runOffTopicCheck、generateFullEssayDraft、rewriteParagraphByAdvice 三条主链。';
+  if (name === '素材卡提取') return '检查素材卡导入器相关函数和 localStorage 是否正常，并确认正文中有题目、立意或例证句。';
   return '根据失败项逐条排查。';
 }
 
@@ -2677,6 +2933,69 @@ function renderEssayFilterBar(container, activeFilter, favorites) {
     { id: '价值判断题', label: '价值判断题' }
   ];
   container.innerHTML = options.map((o) => `<button class="essay-filter-btn ${activeFilter === o.id ? 'active' : ''}" type="button" data-filter="${escapeHtml(o.id)}">${escapeHtml(o.label)}</button>`).join('');
+}
+
+function renderMaterialCardList(container) {
+  if (!container) return;
+  const cards = [...loadMaterialCards()].sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0)).slice(0, 8);
+  if (!cards.length) {
+    container.innerHTML = '<div class="material-card-empty">暂无素材卡。粘贴一篇文章后，点击“生成素材卡”。</div>';
+    return;
+  }
+  container.innerHTML = cards.map((card) => `
+    <div class="material-card-item">
+      <div class="material-card-main">
+        <strong>${escapeHtml(card.title)}</strong>
+        <span>${escapeHtml(card.topic || '未提取题目')}</span>
+        <div class="agent-tags">${(card.tags || []).slice(0, 4).map((tag) => `<span class="agent-tag">${escapeHtml(tag)}</span>`).join('')}</div>
+      </div>
+      <div class="material-card-actions">
+        <button class="agent-btn ghost material-card-use" type="button" data-card-id="${escapeHtml(card.id)}">查看/调用</button>
+        <button class="agent-btn ghost material-card-train" type="button" data-card-id="${escapeHtml(card.id)}">练此题</button>
+        <button class="agent-btn ghost material-card-delete" type="button" data-card-id="${escapeHtml(card.id)}">删除</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+function renderMaterialCardCreatedReport(card) {
+  return `
+    <div class="agent-result-head">
+      <h3>素材卡已生成</h3>
+      <div class="agent-tags">
+        <span class="agent-tag">本地保存</span>
+        <span class="agent-tag">原文字数：${card.wordCount || 0}</span>
+        ${(card.tags || []).slice(0, 4).map((tag) => `<span class="agent-tag">${escapeHtml(tag)}</span>`).join('')}
+      </div>
+    </div>
+    ${renderMaterialCardDetail(card, true)}
+  `;
+}
+
+function renderMaterialCardDetail(card, innerOnly = false) {
+  const structureRows = (card.structure || []).map((x) => `<li>${escapeHtml(x)}</li>`).join('');
+  const materialRows = (card.materials || []).map((x) => `<li>${escapeHtml(x)}</li>`).join('');
+  const goldenRows = (card.goldenSentences || []).map((x) => `<li class="sentence-good">${escapeHtml(x)}</li>`).join('');
+  const body = `
+    <div class="agent-result-block">
+      <h4>${escapeHtml(card.title)}</h4>
+      <p><strong>提取题目：</strong>${escapeHtml(card.topic || '未提取')}</p>
+      <p><strong>中心论点：</strong>${escapeHtml(card.thesis || '待补充')}</p>
+    </div>
+    <div class="agent-result-block"><h4>结构拆解</h4><ol>${structureRows || '<li>暂无结构信息</li>'}</ol></div>
+    <div class="agent-result-block"><h4>可借鉴素材</h4><ul>${materialRows || '<li>暂无素材句，可重新粘贴更完整正文。</li>'}</ul></div>
+    <div class="agent-result-block"><h4>高分句式</h4><ul>${goldenRows || '<li>暂无明显高分句。</li>'}</ul></div>
+    <div class="agent-result-block">
+      <h4>如何调用</h4>
+      <p>已切换到“案例素材池：我的素材卡”后，再点“一键生成800-850字范文”，系统会优先调用这类素材卡。</p>
+    </div>`;
+  if (innerOnly) return body;
+  return `
+    <div class="agent-result-head">
+      <h3>素材卡详情</h3>
+      <div class="agent-tags">${(card.tags || []).slice(0, 5).map((tag) => `<span class="agent-tag">${escapeHtml(tag)}</span>`).join('')}</div>
+    </div>
+    ${body}`;
 }
 
 function loadEssayFavorites() {

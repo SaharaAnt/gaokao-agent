@@ -59,6 +59,7 @@
           <option value="edu">案例素材池：教育成长</option>
           <option value="culture">案例素材池：文化传播</option>
           <option value="society">案例素材池：社会治理</option>
+          <option value="mycards">案例素材池：我的素材卡</option>
         </select>
         <button id="sampleTopicBtn" class="agent-btn ghost">填充示例</button>
         <button id="randomTopicBtn" class="agent-btn ghost">一键抽题训练</button>
@@ -70,6 +71,20 @@
         <div class="essay-library-title">范文列表</div>
         <div class="essay-filter-bar" id="essayFilterBar"></div>
         <div class="essay-library-list" id="essaySampleList"></div>
+      </div>
+
+      <div class="material-card-lab" id="materialCardLab">
+        <div class="essay-library-title">公众号文章素材卡导入器</div>
+        <p class="material-card-tip">粘贴你有权学习使用的文章内容，系统只保存提炼后的素材卡，不公开保存全文。</p>
+        <label class="agent-label" for="materialTitleInput">文章标题</label>
+        <input id="materialTitleInput" class="material-input" placeholder="例如：【王老师教作文67】松江区高三二模佳作评析" />
+        <label class="agent-label" for="materialBodyInput">文章正文</label>
+        <textarea id="materialBodyInput" class="agent-textarea material-body" placeholder="粘贴文章正文，系统会提取题目、中心论点、结构、素材和金句。"></textarea>
+        <div class="agent-actions">
+          <button id="createMaterialCardBtn" class="agent-btn primary">生成素材卡</button>
+          <button id="clearMaterialInputBtn" class="agent-btn ghost">清空输入</button>
+        </div>
+        <div id="materialCardList" class="material-card-list"></div>
       </div>
 
       <label class="agent-label draft-label" for="essayDraftInput">作文草稿（用于评分与防跑题检查）</label>
@@ -127,7 +142,7 @@
     <div class="timeline" id="timelineContainer"></div>
   </section>
 
-  <script src="data.js?v=40"></script>
-  <script src="app.js?v=40"></script>
+  <script src="data.js?v=42"></script>
+  <script src="app.js?v=42"></script>
 </body>
 </html>
