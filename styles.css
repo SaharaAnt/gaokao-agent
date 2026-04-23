@@ -175,6 +175,13 @@ body {
 .score-row-top { display: flex; justify-content: space-between; }
 .score-bar { height: 8px; border-radius: 999px; background: rgba(148, 163, 184, 0.22); overflow: hidden; margin-top: 7px; }
 .score-bar > span { display: block; height: 100%; background: linear-gradient(90deg, #34d399 0%, #22d3ee 45%, #60a5fa 100%); }
+.week-bar-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 8px; align-items: end; }
+.week-bar-card { border: 1px solid var(--line); border-radius: 14px; padding: 10px 8px; background: rgba(240, 249, 255, 0.88); text-align: center; display: grid; gap: 4px; }
+.week-bar-wrap { height: 92px; display: flex; align-items: end; justify-content: center; }
+.week-bar-fill { width: 22px; border-radius: 999px; background: linear-gradient(180deg, #22d3ee 0%, #60a5fa 100%); display: block; box-shadow: 0 8px 16px rgba(96, 165, 250, 0.18); }
+.week-bar-card strong { color: #1d4ed8; font-size: 18px; line-height: 1; }
+.week-bar-card span { color: #466392; font-size: 12px; }
+.week-bar-card em { color: #64748b; font-style: normal; font-size: 12px; }
 .flaw-row { border: 1px solid var(--line); border-radius: 10px; padding: 9px; background: rgba(224, 242, 254, 0.45); }
 .flaw-row + .flaw-row { margin-top: 8px; }
 .flaw-row-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
@@ -236,6 +243,7 @@ body {
   .hero-title { font-size: 50px; }
   .evo-grid { grid-template-columns: 1fr; }
   .evo-bottom { grid-template-columns: 1fr; }
+  .week-bar-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 }
 @media (max-width: 640px) {
   .hero-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -243,4 +251,5 @@ body {
   .card-title { font-size: 28px; }
   .card-description { font-size: 15px; }
   .card-foot { font-size: 12px; }
+  .week-bar-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }

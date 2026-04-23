@@ -4,6 +4,7 @@ const ESSAY_FAVORITES_STORAGE_KEY = 'gaokao_essay_favorites_v1';
 const TRAINING_STATS_STORAGE_KEY = 'gaokao_training_stats_v1';
 const PATH_TRAINING_STORAGE_KEY = 'gaokao_path_training_v1';
 const ERROR_BOOK_STORAGE_KEY = 'gaokao_error_book_v1';
+const TRAINING_SESSION_LIMIT = 120;
 
 const TIMELINE_SCORE_GUIDE = {
   '2025': '重点看“概念链条完整度”：是否同时处理“专-转-传”，并对“必定”给出条件判断。',
@@ -290,6 +291,7 @@ function initAgentWorkbench() {
   const offTopicCheckBtn = document.getElementById('offTopicCheckBtn');
   const scoreDraftBtn = document.getElementById('scoreDraftBtn');
   const improveDraftBtn = document.getElementById('improveDraftBtn');
+  const weeklyDashboardBtn = document.getElementById('weeklyDashboardBtn');
   const regressionTestBtn = document.getElementById('regressionTestBtn');
   const baselineCheckBtn = document.getElementById('baselineCheckBtn');
   const resultContainer = document.getElementById('agentResult');
@@ -349,7 +351,14 @@ function initAgentWorkbench() {
     if (!topic) return void (resultContainer.innerHTML = '<p class="agent-empty">请先输入作文题目。</p>');
     if (!draft) return void (resultContainer.innerHTML = '<p class="agent-empty">请先粘贴作文草稿。</p>');
     const score = scoreEssayDraft(topic, draft);
-    updateTrainingStats(score.dimensions);
+    updateTrainingStats(score.dimensions, {
+      topic,
+      total: score.total,
+      score70: score.score70,
+      riskLevel: score.offTopic?.riskLevel || '中',
+      source: 'score',
+      topicType: detectTopicType(topic)
+    });
     recordErrorBookEntry({ topic, draft, score, offTopic: score.offTopic, source: 'score' });
     renderScoreReport(score, resultContainer);
   });
@@ -362,8 +371,19 @@ function initAgentWorkbench() {
     const boost = applyScoreBoostRewrite(topic, draft);
     draftInput.value = boost.newDraft;
     updateExamWordCountDisplay(draftInput, examWordCount);
-    updateTrainingStats(boost.after.dimensions);
+    updateTrainingStats(boost.after.dimensions, {
+      topic,
+      total: boost.after.total,
+      score70: boost.after.score70,
+      riskLevel: boost.after.offTopic?.riskLevel || '中',
+      source: 'boost',
+      topicType: detectTopicType(topic)
+    });
     renderScoreBoostReport(boost, resultContainer);
+  });
+
+  weeklyDashboardBtn?.addEventListener('click', () => {
+    renderWeeklyDashboardReport(buildWeeklyTrainingDashboard(), resultContainer);
   });
 
   baselineCheckBtn?.addEventListener('click', () => {
@@ -622,6 +642,28 @@ function initAgentWorkbench() {
       const topic = topicInput.value.trim() || '请完成错因专项训练';
       topicInput.value = `${topic}\n【错因专项】${trainingPrompt}`;
       resultContainer.innerHTML = `<p class="agent-empty">已根据高频错因推送专项训练，请点击“分析题目”或直接续写。</p>`;
+      return;
+    }
+
+    const weeklyPromptBtn = e.target.closest('.weekly-prompt-btn');
+    if (weeklyPromptBtn) {
+      const trainingPrompt = weeklyPromptBtn.dataset.trainingPrompt || '';
+      if (!trainingPrompt) return;
+      const topic = topicInput.value.trim() || '请完成本周补短板训练';
+      topicInput.value = `${topic}\n【周训练补短板】${trainingPrompt}`;
+      resultContainer.innerHTML = '<p class="agent-empty">已把本周补短板任务写入题目框，点击“分析题目”即可开练。</p>';
+      return;
+    }
+
+    const weeklyTopicBtn = e.target.closest('.weekly-topic-btn');
+    if (weeklyTopicBtn) {
+      const recommendedTopic = weeklyTopicBtn.dataset.recommendedTopic || '';
+      if (!recommendedTopic) return;
+      topicInput.value = recommendedTopic;
+      renderAgentResult(analyzeEssayTopic(recommendedTopic), resultContainer);
+      topicInput.focus();
+      document.getElementById('agentWorkbench')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return;
     }
   });
 
@@ -2219,6 +2261,7 @@ function runBaselineHealthCheck() {
     'offTopicCheckBtn',
     'scoreDraftBtn',
     'improveDraftBtn',
+    'weeklyDashboardBtn',
     'regressionTestBtn',
     'baselineCheckBtn',
     'agentResult'
@@ -2385,6 +2428,18 @@ function runFeatureFlowChecks() {
     checks.push({ name: '案例素材池分流', ok: false, detail: `异常：${err?.message || '未知错误'}` });
   }
 
+  try {
+    const data = buildWeeklyTrainingDashboard();
+    const ok = Array.isArray(data.dayRows) && data.dayRows.length === 7 && typeof data.recommendation?.prompt === 'string';
+    checks.push({
+      name: '周训练看板生成',
+      ok,
+      detail: ok ? '近7天走势与推荐动作可生成' : '周看板数据结构异常'
+    });
+  } catch (err) {
+    checks.push({ name: '周训练看板生成', ok: false, detail: `异常：${err?.message || '未知错误'}` });
+  }
+
   return checks;
 }
 
@@ -2436,6 +2491,14 @@ function runRegressionSuite() {
     cases.push({ name: '段落级一键改写', ok, detail: ok ? '可完成整段替换' : '未能生成有效改写' });
   } catch (err) {
     cases.push({ name: '段落级一键改写', ok: false, detail: `异常：${err?.message || '未知错误'}` });
+  }
+
+  try {
+    const migrated = normalizeTrainingStatsPayload({ count: 2, dims: { '审题立意': { sum: 28, max: 20, times: 2 } } });
+    const ok = !!migrated && migrated.count === 2 && Array.isArray(migrated.sessions) && migrated.sessions.length === 0;
+    cases.push({ name: '训练统计旧数据兼容', ok, detail: ok ? '旧版统计可平滑迁移到新结构' : '旧版统计结构未兼容' });
+  } catch (err) {
+    cases.push({ name: '训练统计旧数据兼容', ok: false, detail: `异常：${err?.message || '未知错误'}` });
   }
 
   const passed = cases.filter((x) => x.ok).length;
@@ -2523,18 +2586,40 @@ function saveEssayFavorites(set) {
   try { localStorage.setItem(ESSAY_FAVORITES_STORAGE_KEY, JSON.stringify([...set])); } catch (_) {}
 }
 
+function normalizeTrainingStatsPayload(parsed) {
+  if (!parsed || typeof parsed !== 'object') return { count: 0, dims: {}, sessions: [] };
+  const sessions = Array.isArray(parsed.sessions)
+    ? parsed.sessions
+      .map((item) => ({
+        day: typeof item?.day === 'string' ? item.day : getDateKey(Number(item?.ts || Date.now())),
+        total: clamp(Number(item?.total || 0), 0, 100),
+        score70: clamp(Number(item?.score70 || 0), 0, 70),
+        riskLevel: typeof item?.riskLevel === 'string' ? item.riskLevel : '中',
+        source: typeof item?.source === 'string' ? item.source : 'score',
+        topicType: typeof item?.topicType === 'string' ? item.topicType : '未分类',
+        topic: topicTrainingKey(item?.topic || ''),
+        ts: Number(item?.ts || Date.now())
+      }))
+      .slice(-TRAINING_SESSION_LIMIT)
+    : [];
+  return {
+    count: Number(parsed.count || 0),
+    dims: parsed.dims && typeof parsed.dims === 'object' ? parsed.dims : {},
+    sessions
+  };
+}
+
 function loadTrainingStats() {
   try {
     const raw = localStorage.getItem(TRAINING_STATS_STORAGE_KEY);
     const parsed = raw ? JSON.parse(raw) : null;
-    if (!parsed || typeof parsed !== 'object') return { count: 0, dims: {} };
-    return { count: parsed.count || 0, dims: parsed.dims || {} };
+    return normalizeTrainingStatsPayload(parsed);
   } catch (_) {
-    return { count: 0, dims: {} };
+    return { count: 0, dims: {}, sessions: [] };
   }
 }
 
-function updateTrainingStats(dimensions) {
+function updateTrainingStats(dimensions, meta = {}) {
   if (!Array.isArray(dimensions) || !dimensions.length) return;
   const stats = loadTrainingStats();
   stats.count += 1;
@@ -2546,6 +2631,18 @@ function updateTrainingStats(dimensions) {
     prev.times += 1;
     stats.dims[key] = prev;
   });
+  const total = clamp(Number(meta.total || dimensions.reduce((sum, item) => sum + Number(item.score || 0), 0)), 0, 100);
+  const session = {
+    day: getDateKey(meta.ts),
+    total,
+    score70: clamp(Number(meta.score70 || Math.round(total * 0.7)), 0, 70),
+    riskLevel: normalizeRiskLabel(meta.riskLevel),
+    source: typeof meta.source === 'string' ? meta.source : 'score',
+    topicType: typeof meta.topicType === 'string' && meta.topicType.trim() ? meta.topicType.trim() : '未分类',
+    topic: topicTrainingKey(meta.topic || ''),
+    ts: Number(meta.ts || Date.now())
+  };
+  stats.sessions = Array.isArray(stats.sessions) ? [...stats.sessions, session].slice(-TRAINING_SESSION_LIMIT) : [session];
   try { localStorage.setItem(TRAINING_STATS_STORAGE_KEY, JSON.stringify(stats)); } catch (_) {}
 }
 
@@ -2565,6 +2662,52 @@ function loadErrorBook() {
 
 function saveErrorBook(book) {
   try { localStorage.setItem(ERROR_BOOK_STORAGE_KEY, JSON.stringify(book)); } catch (_) {}
+}
+
+function getDateKey(ts) {
+  const d = new Date(Number(ts || Date.now()));
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function buildRecentDateKeys(days) {
+  const arr = [];
+  for (let i = days - 1; i >= 0; i--) {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    d.setDate(d.getDate() - i);
+    arr.push(getDateKey(d.getTime()));
+  }
+  return arr;
+}
+
+function formatDateShort(key) {
+  const d = new Date(`${key}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return key;
+  return `${d.getMonth() + 1}/${d.getDate()}`;
+}
+
+function normalizeRiskLabel(level) {
+  if (typeof level !== 'string') return '中';
+  if (/低/.test(level)) return '低';
+  if (/高/.test(level)) return '高';
+  return '中';
+}
+
+function calculateTrainingStreak(sessions) {
+  const days = dedupeArray((Array.isArray(sessions) ? sessions : []).map((item) => item.day).filter(Boolean)).sort();
+  if (!days.length) return 0;
+  let streak = 0;
+  let cursor = new Date();
+  cursor.setHours(0, 0, 0, 0);
+  const daySet = new Set(days);
+  while (daySet.has(getDateKey(cursor.getTime()))) {
+    streak += 1;
+    cursor.setDate(cursor.getDate() - 1);
+  }
+  return streak;
 }
 
 function extractErrorTags({ draft, score, offTopic }) {
@@ -2654,14 +2797,174 @@ function buildWeakTrainingPlan(report) {
     return { label: d.label, score: d.score, avg };
   });
   const weak = current.sort((a, b) => (a.score + a.avg) - (b.score + b.avg)).slice(0, 2);
-  const plan = weak.map((w) => {
-    if (w.label === '审题立意') return { label: w.label, drill: '练习：给同一题写3个“条件化立场句”，每句必须含“前提/边界”。', prompt: '请写3个不同立场的条件化中心论点句。' };
-    if (w.label === '结构章法') return { label: w.label, drill: '练习：把一段散文改成“界定-论证-收束”三段，每段2句。', prompt: '请把草稿改写为三段结构，每段2句。' };
-    if (w.label === '论证与材料') return { label: w.label, drill: '练习：任选1个例子，补写2句“机制解释”，禁止只叙事。', prompt: '请给这个例子补两句机制解释。' };
-    if (w.label === '语言表达') return { label: w.label, drill: '练习：删去3句口号句，改成“判断句+依据句”。', prompt: '请将口号化句子改成判断+依据表达。' };
-    return { label: w.label, drill: '练习：补一段“诚然-然而-因此”三句论证并写边界条件。', prompt: '请写一段三句辩证论证，包含边界条件。' };
-  });
+  const plan = weak.map((w) => buildWeakDimensionDrill(w.label));
   return { count: stats.count, weak: plan };
+}
+
+function buildWeakDimensionDrill(label) {
+  if (label === '审题立意') return { label, drill: '练习：给同一题写3个“条件化立场句”，每句必须含“前提/边界”。', prompt: '请写3个不同立场的条件化中心论点句。' };
+  if (label === '结构章法') return { label, drill: '练习：把一段散文改成“界定-论证-收束”三段，每段2句。', prompt: '请把草稿改写为三段结构，每段2句。' };
+  if (label === '论证与材料') return { label, drill: '练习：任选1个例子，补写2句“机制解释”，禁止只叙事。', prompt: '请给这个例子补两句机制解释。' };
+  if (label === '语言表达') return { label, drill: '练习：删去3句口号句，改成“判断句+依据句”。', prompt: '请将口号化句子改成判断+依据表达。' };
+  return { label, drill: '练习：补一段“诚然-然而-因此”三句论证并写边界条件。', prompt: '请写一段三句辩证论证，包含边界条件。' };
+}
+
+function buildWeeklyTrainingDashboard() {
+  const stats = loadTrainingStats();
+  const sessions = Array.isArray(stats.sessions) ? stats.sessions : [];
+  const recentDays = buildRecentDateKeys(7);
+  const recentSet = new Set(recentDays);
+  const dayMap = Object.fromEntries(recentDays.map((day) => [day, { count: 0, score70Sum: 0, risks: { 低: 0, 中: 0, 高: 0 } }]));
+  const weeklySessions = sessions.filter((item) => recentSet.has(item.day));
+  weeklySessions.forEach((item) => {
+    const bucket = dayMap[item.day];
+    if (!bucket) return;
+    bucket.count += 1;
+    bucket.score70Sum += Number(item.score70 || 0);
+    bucket.risks[normalizeRiskLabel(item.riskLevel)] += 1;
+  });
+
+  const dayRows = recentDays.map((day) => {
+    const bucket = dayMap[day];
+    return {
+      day,
+      label: formatDateShort(day),
+      count: bucket.count,
+      avg70: bucket.count ? Math.round(bucket.score70Sum / bucket.count) : 0,
+      riskHigh: bucket.risks.高
+    };
+  });
+
+  const weeklyCount = weeklySessions.length;
+  const avg70 = weeklyCount ? Math.round(weeklySessions.reduce((sum, item) => sum + Number(item.score70 || 0), 0) / weeklyCount) : 0;
+  const avgTotal = weeklyCount ? Math.round(weeklySessions.reduce((sum, item) => sum + Number(item.total || 0), 0) / weeklyCount) : 0;
+  const riskCounts = weeklySessions.reduce((acc, item) => {
+    acc[normalizeRiskLabel(item.riskLevel)] += 1;
+    return acc;
+  }, { 低: 0, 中: 0, 高: 0 });
+  const streak = calculateTrainingStreak(sessions);
+
+  const weakestDims = Object.entries(stats.dims || {})
+    .map(([label, item]) => ({ label, avg: item.times ? Math.round((item.sum / item.times) * 10) / 10 : 0, times: Number(item.times || 0) }))
+    .sort((a, b) => a.avg - b.avg)
+    .slice(0, 3)
+    .map((item) => ({ ...item, ...buildWeakDimensionDrill(item.label) }));
+
+  const errorBook = loadErrorBook();
+  const recentCutoff = Date.now() - 14 * 24 * 60 * 60 * 1000;
+  const hotErrors = Object.entries(errorBook.tags || {})
+    .map(([tag, meta]) => ({ tag, count: Number(meta?.count || 0), lastTs: Number(meta?.lastTs || 0) }))
+    .filter((item) => item.lastTs >= recentCutoff)
+    .sort((a, b) => b.count - a.count || b.lastTs - a.lastTs)
+    .slice(0, 3);
+
+  const recommendation = buildWeeklyTopicRecommendation(weakestDims, hotErrors);
+
+  return {
+    count: stats.count,
+    weeklyCount,
+    avg70,
+    avgTotal,
+    streak,
+    dayRows,
+    riskCounts,
+    weakestDims,
+    hotErrors,
+    recommendation
+  };
+}
+
+function buildWeeklyTopicRecommendation(weakestDims, hotErrors) {
+  const weakLabel = weakestDims[0]?.label || '';
+  const hotTag = hotErrors[0]?.tag || '';
+  const pool = Array.isArray(TIMELINE_DATA) ? TIMELINE_DATA : [];
+  let picked = null;
+
+  const byYear = (year) => pool.find((item) => String(item.year) === String(year));
+  if (!picked && (weakLabel === '审题立意' || /题眼覆盖|审题立意/.test(hotTag))) picked = byYear('2024') || byYear('2025');
+  if (!picked && (weakLabel === '结构章法' || /结构节奏|字数不足/.test(hotTag))) picked = byYear('2022') || byYear('2014');
+  if (!picked && (weakLabel === '论证与材料' || /机制解释|例证堆砌/.test(hotTag))) picked = byYear('2020') || byYear('2025');
+  if (!picked && (weakLabel === '语言表达' || /语言表达|结论绝对化/.test(hotTag))) picked = byYear('2023') || byYear('2018');
+  if (!picked && (weakLabel === '思辨深度' || /辩证覆盖|单边论证|边界收束/.test(hotTag))) picked = byYear('2014') || byYear('2021');
+  if (!picked) picked = pool[0] || null;
+
+  const prompt = weakestDims[0]?.prompt || (hotTag ? buildErrorDrillFromTag(hotTag).prompt : '请围绕本周最弱维度完成专项训练。');
+  return {
+    label: weakLabel || '综合训练',
+    prompt,
+    topic: picked?.prompt || '',
+    year: picked?.year || ''
+  };
+}
+
+function renderWeeklyDashboardReport(report, container) {
+  const maxCount = Math.max(1, ...(report.dayRows || []).map((item) => item.count || 0));
+  const bars = (report.dayRows || []).map((item) => `
+    <div class="week-bar-card">
+      <div class="week-bar-wrap"><span class="week-bar-fill" style="height:${item.count ? Math.max(14, Math.round((item.count / maxCount) * 88)) : 8}px"></span></div>
+      <strong>${item.count}</strong>
+      <span>${escapeHtml(item.label)}</span>
+      <em>均分 ${item.avg70}</em>
+    </div>
+  `).join('');
+  const weakRows = (report.weakestDims || []).map((item, index) => `
+    <li>
+      <strong>${index + 1}. ${escapeHtml(item.label)}</strong>（均分 ${escapeHtml(String(item.avg))}/20）：
+      ${escapeHtml(item.drill)}
+      <button class="agent-btn ghost weekly-prompt-btn" type="button" data-training-prompt="${escapeHtml(item.prompt)}">推送补练</button>
+    </li>
+  `).join('');
+  const errorRows = (report.hotErrors || []).map((item, index) => `
+    <li>
+      <strong>${index + 1}. ${escapeHtml(item.tag)}</strong>（${item.count}次）
+      <button class="agent-btn ghost weekly-prompt-btn" type="button" data-training-prompt="${escapeHtml(buildErrorDrillFromTag(item.tag).prompt)}">按错因补练</button>
+    </li>
+  `).join('');
+
+  const recommendationTopic = report.recommendation?.topic || '';
+  const recommendationButton = recommendationTopic
+    ? `<button class="agent-btn primary weekly-topic-btn" type="button" data-recommended-topic="${escapeHtml(recommendationTopic)}">直接练这道题${report.recommendation?.year ? `（${escapeHtml(report.recommendation.year)}）` : ''}</button>`
+    : '';
+
+  container.innerHTML = `
+    <div class="agent-result-head">
+      <h3>周训练看板</h3>
+      <div class="agent-tags">
+        <span class="agent-tag">累计训练：${report.count}次</span>
+        <span class="agent-tag">近7天：${report.weeklyCount}次</span>
+        <span class="agent-tag">近7天均分：${report.avg70}/70</span>
+        <span class="agent-tag">连续打卡：${report.streak}天</span>
+      </div>
+    </div>
+    <div class="agent-result-block">
+      <h4>最近7天训练走势</h4>
+      <div class="week-bar-grid">${bars || '<p class="agent-empty">近7天还没有训练记录。</p>'}</div>
+    </div>
+    <div class="agent-result-block">
+      <h4>本周风险分布</h4>
+      <div class="agent-tags">
+        <span class="agent-tag risk low">低风险 ${report.riskCounts?.低 || 0}</span>
+        <span class="agent-tag risk medium">中风险 ${report.riskCounts?.中 || 0}</span>
+        <span class="agent-tag risk high">高风险 ${report.riskCounts?.高 || 0}</span>
+      </div>
+      <p>如果“高风险”连续两天大于 0，优先先练审题和题眼覆盖，不要急着追求辞藻。</p>
+    </div>
+    <div class="agent-result-block">
+      <h4>当前最弱维度</h4>
+      <ul>${weakRows || '<li>暂未形成有效画像，先做2次评分再来看板。</li>'}</ul>
+    </div>
+    <div class="agent-result-block">
+      <h4>最近高频错因</h4>
+      <ul>${errorRows || '<li>最近14天暂无明显高频错因，可继续稳定输出。</li>'}</ul>
+    </div>
+    <div class="agent-result-block">
+      <h4>本周推荐下一练</h4>
+      <p>建议先补：<strong>${escapeHtml(report.recommendation?.label || '综合训练')}</strong>。先用专项练习补动作，再上真题更稳。</p>
+      <div class="agent-actions secondary">
+        <button class="agent-btn ghost weekly-prompt-btn" type="button" data-training-prompt="${escapeHtml(report.recommendation?.prompt || '请完成本周综合训练。')}">先做补短板训练</button>
+        ${recommendationButton}
+      </div>
+    </div>`;
 }
 
 function initEvolutionOverview() {
