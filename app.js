@@ -1611,6 +1611,9 @@ function generateFullEssayDraft(topic, analysis, minWords = 800, maxWords = 850,
   const key = analysis.topicPhrases?.[0] || '该命题';
   const key2 = analysis.topicPhrases?.[1] || '另一端';
   const topicType = analysis.topicType?.code || 'phenomenon';
+  if (isExpoThemeTopic(topic)) {
+    return normalizeEssayLength(buildExpoThemeEssay(topic).join('\n\n'), minWords, maxWords, topic, '世博会主题', '城市文明', 'expo');
+  }
   const template = buildEssayTemplateByType(topic, key, key2, topicType, opts.casePool || 'auto');
   let essay = template.join('\n\n');
   essay = applyTriadEnhancement(essay, analysis);
@@ -1618,20 +1621,54 @@ function generateFullEssayDraft(topic, analysis, minWords = 800, maxWords = 850,
   return essay;
 }
 
+function isExpoThemeTopic(topic) {
+  return /(世博会|上海世博|2010).*?(主题|确立|设想|论证)/.test(String(topic || ''));
+}
+
+function buildExpoThemeEssay() {
+  return [
+    [
+      '我为2010年上海世博会确立的主题是：“城市，让世界共享更好的生活”。',
+      '这个主题既回应了上海作为现代都市的开放气质，也回应了世博会本身的公共使命：它不是单纯展示新奇建筑与先进技术，而是让不同国家、不同文化的人们共同思考，未来的城市应当怎样安放人的生活。'
+    ].join(''),
+    [
+      '确立这一主题，首先因为城市已经成为现代文明最集中的现场。',
+      '交通、住宅、教育、医疗、商业、文化都在城市中交织，人的机会在这里被放大，人的困境也在这里被集中呈现。',
+      '如果城市只追求速度、高度和规模，就可能让人被拥挤、污染与冷漠包围；如果城市能以人的需要为尺度，技术进步才真正转化为生活质量。'
+    ].join(''),
+    [
+      '其次，“共享”应当成为世博会区别于一般展览的关键词。',
+      '世博会当然要展示各国的创造力，但更重要的是让创造力彼此交流、互相启发。',
+      '发达国家的环保经验、发展中国家的社区智慧、不同民族的审美传统，都可以在上海相遇。',
+      '这种相遇不是简单陈列，而是把差异转化为理解，把展示转化为合作。'
+    ].join(''),
+    [
+      '以此为主题，展馆设计也应围绕“生活”展开。',
+      '我设想可以设置“未来社区”“绿色交通”“水岸上海”“少年城市”几个板块：在未来社区中展示节能住宅与公共服务；在绿色交通中呈现地铁、步行空间和自行车系统；在水岸上海中讲述黄浦江两岸从工业岸线走向公共空间的变化；在少年城市中让孩子参与设计自己的街道、公园和学校。',
+      '这样，参观者看到的不只是模型，而是可触摸的生活方案。'
+    ].join(''),
+    [
+      '这个主题也契合上海自身的位置。',
+      '上海曾因港口而开放，因工业而兴盛，也正在因文化、科技和公共治理而更新。',
+      '它既有外滩建筑留下的历史记忆，也有浦东高楼展示的未来想象。',
+      '如果上海能够借世博会把“开放”进一步转化为“共生”，把“发展”进一步转化为“宜居”，那么这场盛会就不仅属于2010年，也会成为城市长期更新的起点。'
+    ].join(''),
+    [
+      '因此，“城市，让世界共享更好的生活”不是一句口号，而是一种价值判断：城市的最终意义不在于征服自然、炫耀财富，而在于让人更有尊严、更有联系、更有创造力地生活。',
+      '当来自世界各地的人们在上海相遇，他们带走的若不仅是惊叹，更是对未来生活的责任感，这样的世博会才真正完成了自己的使命。'
+    ].join('')
+  ];
+}
+
 function normalizeEssayLength(text, minWords, maxWords, topic, key, key2, topicType) {
   let draft = String(text || '');
-  const expansionPool = [
-    `进一步而言，题目中的关键词并不是静态标签，而是随情境变化而调整含义的“关系节点”。`,
-    `这就要求写作者在论证时保持两个动作：一是不断回扣题眼，二是不断检验论证边界。`,
-    topicType === 'relation'
-      ? `若忽视“${key}”与“${key2}”的双向作用，结论就会失去弹性，难以解释现实中的复杂样态。`
-      : `若忽视前提差异，同一个判断在不同场景下可能产生完全相反的后果。`,
-    `从备考角度看，这类题目筛选的不是“记忆句子”的能力，而是“组织思维”的能力。`,
-    `因此，考场写作的关键不是追求词句华丽，而是让观点、例证、机制、结论形成闭环。`
-  ];
+  const expansionPool = buildEssayExpansionPool(topic, key, key2, topicType);
+  let expansionIndex = 0;
 
-  while (countWords(draft) < minWords) {
-    const next = expansionPool[Math.floor(Math.random() * expansionPool.length)];
+  while (countWords(draft) < minWords && expansionIndex < expansionPool.length) {
+    const next = expansionPool[expansionIndex];
+    expansionIndex += 1;
+    if (!next || draft.includes(next.slice(0, 18))) continue;
     draft = `${draft}\n\n${next}`;
     if (countWords(draft) > maxWords + 30) break;
   }
@@ -1659,20 +1696,47 @@ function normalizeEssayLength(text, minWords, maxWords, topic, key, key2, topicT
     draft = out.join('\n\n');
   }
 
-  const tailPool = [
-    '总之，面对复杂问题，最可靠的写作姿态不是急于下结论，而是让判断在论证中不断被校准。',
-    '只有把观点放进现实情境反复检验，写作才会从“会说”走向“会思考”。',
-    '这也正是高质量议论文的价值：它不仅给出态度，更给出可被验证的理由。'
-  ];
+  const tailPool = buildEssayTailPool(topic, key, key2, topicType);
   let guard = 0;
-  while (countWords(draft) < minWords && guard < 8) {
-    draft = `${draft}\n\n${tailPool[guard % tailPool.length]}`;
+  while (countWords(draft) < minWords && guard < tailPool.length) {
+    const next = tailPool[guard];
     guard += 1;
+    if (!next || draft.includes(next.slice(0, 18))) continue;
+    draft = `${draft}\n\n${next}`;
   }
   if (countWords(draft) > maxWords) {
     draft = trimDraftToWordLimit(draft, maxWords);
   }
   return draft;
+}
+
+function buildEssayExpansionPool(topic, key, key2, topicType) {
+  if (topicType === 'expo') {
+    return [
+      '更进一步看，世博会的价值还在于给普通人一次想象未来的机会。宏大的国家叙事最终要落回日常生活：一条更安全的街道、一片更亲近的绿地、一种更便利的公共服务，都会让城市文明变得具体。',
+      '因此，主题设计不能只求响亮，更要能组织展览内容、引导公众参与，并留下可持续的城市行动。'
+    ];
+  }
+  return [
+    `进一步而言，“${key}”不是孤立标签，而应放进具体场景中理解。它在一种条件下可能指向进步，在另一种条件下也可能暴露局限。`,
+    topicType === 'relation'
+      ? `若忽视“${key}”与“${key2}”的双向作用，文章就容易滑向单边判断；只有写清二者如何互相制约，论证才有弹性。`
+      : `若忽视前提差异，同一个判断在不同场景下可能产生不同后果，所以文章必须补出机制，而不是只给态度。`,
+    `现实生活中，真正可靠的判断往往不是最响亮的判断，而是能说明标准、承认例外、回应问题的判断。`
+  ];
+}
+
+function buildEssayTailPool(topic, key, key2, topicType) {
+  if (topicType === 'expo') {
+    return [
+      '由此可见，一个好的世博主题应当同时具备方向感、包容性与可操作性。它既能概括时代问题，又能转化为展馆内容和公共行动。',
+      '这样的主题，才不会停留在宣传语上，而会成为城市面向未来的一次认真回答。'
+    ];
+  }
+  return [
+    `由此可见，围绕“${key}”展开论证，关键不是重复题目，而是把判断落实到条件、机制和后果之中。`,
+    `只有这样，文章才能既回应题目，又避免空泛；既有立场，又有分寸。`
+  ];
 }
 
 function renderGeneratedEssayReport(payload, container) {
@@ -2510,6 +2574,21 @@ function runRegressionSuite() {
   }
 
   try {
+    const topic = '请为2010年上海世博会确立主题并加以论证。';
+    const analysis = analyzeEssayTopic(topic);
+    const essay = generateFullEssayDraft(topic, analysis, 800, 850, { casePool: 'auto' });
+    const repeated = countMatches(essay, /从备考角度看|这就要求写作者|请为并非绝对成立/g);
+    const ok = /城市，让世界共享更好的生活/.test(essay)
+      && /未来社区|绿色交通|水岸上海|少年城市/.test(essay)
+      && countWords(essay) >= 800
+      && countWords(essay) <= 850
+      && repeated === 0;
+    cases.push({ name: '世博主题题专属范文', ok, detail: ok ? `字数 ${countWords(essay)}，结构完整` : `字数 ${countWords(essay)}，仍有模板化风险` });
+  } catch (err) {
+    cases.push({ name: '世博主题题专属范文', ok: false, detail: `异常：${err?.message || '未知错误'}` });
+  }
+
+  try {
     const topic = '生活中，人们常用认可度判别事物，区分高下。';
     const draft = '认可度很重要。\n\n第二段只是举例，没有解释。\n\n结尾也比较空。';
     const report = runOffTopicCheck(topic, draft);
@@ -3196,6 +3275,7 @@ function initScrollEffects() {
 
 function detectTopicType(topic) {
   const text = topic || '';
+  if (isExpoThemeTopic(text)) return { code: 'method', name: '主题设计论证型' };
   if (/(还是|与|和|之间|对立)/.test(text)) return { code: 'relation', name: '关系辩证型' };
   if (/(是否|应不应该|值得|好不好|应该)/.test(text)) return { code: 'value', name: '价值判断型' };
   if (/(如何|怎么|为什么|路径|方法)/.test(text)) return { code: 'method', name: '方法路径型' };
@@ -3203,13 +3283,14 @@ function detectTopicType(topic) {
 }
 
 function normalizeTopicPhrases(items) {
-  const stop = ['请写一篇文章', '谈谈你的认识', '谈谈你的思考', '你有怎样的思考', '请联系社会生活', '自拟题目', '不少于', '要求'];
-  return dedupeArray((items || []).filter((x) => x && x.length <= 10 && !stop.some((s) => x.includes(s)))).slice(0, 8);
+  const stop = ['请为', '请写一篇文章', '谈谈你的认识', '谈谈你的思考', '谈谈你的认识与思考', '你有怎样的思考', '请联系社会生活', '自拟题目', '不少于', '要求', '加以论证'];
+  return dedupeArray((items || []).filter((x) => x && x.length <= 12 && !stop.some((s) => x.includes(s) || s.includes(x)))).slice(0, 8);
 }
 
 function detectHiddenPremise(topic, topicType, topicPhrases) {
   const text = String(topic || '');
   const key = topicPhrases[0] || '该命题';
+  if (isExpoThemeTopic(text)) return '命题预设“世博会主题不是口号”，你要证明主题能统摄价值、展馆内容与城市想象。';
   if (/必定/.test(text)) return `命题预设“存在一条稳定路径”，你要回答这条路径是否具有必然性。`;
   if (/仅仅/.test(text)) return `命题预设“单一动机解释不足”，你要处理多重动因。`;
   if (/是否/.test(text)) return `命题预设“二元判断可成立”，你要改写为条件化判断。`;
@@ -3218,6 +3299,13 @@ function detectHiddenPremise(topic, topicType, topicPhrases) {
 }
 
 function buildExaminerIntent(topic, topicType, topicPhrases) {
+  if (isExpoThemeTopic(topic)) {
+    return [
+      '考察“公共表达能力”：能否提出清晰、有时代感、可论证的世博主题。',
+      '考察“主题统摄能力”：主题是否能贯穿价值判断、展馆设计和城市发展设想。',
+      '考察“现实想象力”：是否能把上海、世界、未来生活三者联系起来，而非空喊口号。'
+    ];
+  }
   const key = topicPhrases[0] || '该概念';
   const key2 = topicPhrases[1] || '另一端';
   const rows = [
@@ -3229,6 +3317,13 @@ function buildExaminerIntent(topic, topicType, topicPhrases) {
 }
 
 function buildThreeStepAnalysis(topic, topicType, topicPhrases) {
+  if (isExpoThemeTopic(topic)) {
+    return [
+      '第一步 定主题：主题必须简洁、有价值方向，不能只是“欢迎世界”式口号。',
+      '第二步 讲理由：从城市文明、国际交流、人的生活改善三个角度证明主题必要。',
+      '第三步 写设想：把主题落到展馆板块、公共空间、绿色交通、青少年参与等具体方案。'
+    ];
+  }
   const key = topicPhrases[0] || '核心词';
   const key2 = topicPhrases[1] || '关联概念';
   return [
@@ -3241,6 +3336,15 @@ function buildThreeStepAnalysis(topic, topicType, topicPhrases) {
 }
 
 function buildMustAnswerChecklist(topic, topicType, topicPhrases, hiddenPremise) {
+  if (isExpoThemeTopic(topic)) {
+    return [
+      '我是否明确提出了一个可作为题目的世博主题？',
+      '我是否解释了这个主题为什么适合上海、适合2010年、适合世博会？',
+      '我是否写出具体展览或城市设想，而不是只喊口号？',
+      '我是否把“世界交流”与“人的生活”联系起来？',
+      `我是否回应了题目隐含前提：${hiddenPremise}`
+    ];
+  }
   const key = topicPhrases[0] || '题眼';
   const list = [
     `我是否定义了“${key}”而不是直接表态？`,
@@ -3255,6 +3359,13 @@ function buildMustAnswerChecklist(topic, topicType, topicPhrases, hiddenPremise)
 }
 
 function buildExamReadyTemplates(topic, topicType, topicPhrases) {
+  if (isExpoThemeTopic(topic)) {
+    return {
+      opening: '我为2010年上海世博会确立的主题是：“城市，让世界共享更好的生活”。',
+      turning: '然而，世博会的意义不只是展示新奇建筑，更在于让不同文明共同讨论未来城市如何服务人的生活。',
+      rising: '当主题能够连接上海经验、世界交流与未来生活，它才不只是宣传语，而是城市面向未来的公共承诺。'
+    };
+  }
   const key = topicPhrases[0] || '该命题';
   const key2 = topicPhrases[1] || '另一端';
   return {
@@ -3267,6 +3378,15 @@ function buildExamReadyTemplates(topic, topicType, topicPhrases) {
 }
 
 function buildMustAnswerQuestions(topic, topicType, topicPhrases, hiddenPremise) {
+  if (isExpoThemeTopic(topic)) {
+    return [
+      '你的世博主题是什么？是否简洁、明确、有价值方向？',
+      '这个主题为什么适合上海，而不是任何城市都能套用？',
+      '这个主题如何体现世界交流、城市文明与人的生活？',
+      '你能否提出2-3个展馆或活动设想来支撑主题？',
+      `你是否回应了隐含前提：${hiddenPremise}`
+    ];
+  }
   const key = topicPhrases[0] || '该概念';
   const key2 = topicPhrases[1] || '另一概念';
   const common = [
@@ -3285,6 +3405,14 @@ function buildMustAnswerQuestions(topic, topicType, topicPhrases, hiddenPremise)
 }
 
 function buildTopicPitfalls(topic, topicType, topicPhrases) {
+  if (isExpoThemeTopic(topic)) {
+    return [
+      '只写“上海欢迎你”，没有真正确立主题。',
+      '只介绍世博会热闹场面，没有论证主题为什么成立。',
+      '有主题无设想：没有展馆、活动、城市治理等具体落点。',
+      '把文章写成宣传稿，缺少价值判断与现实论证。'
+    ];
+  }
   const key = topicPhrases[0] || '题眼';
   const items = [
     `只复述材料，不解释“${key}”的定义与边界。`,
@@ -3297,6 +3425,7 @@ function buildTopicPitfalls(topic, topicType, topicPhrases) {
 }
 
 function buildTopicThesis(topic, topicType, topicPhrases) {
+  if (isExpoThemeTopic(topic)) return '本文主张：2010年上海世博会可确立“城市，让世界共享更好的生活”为主题，并通过城市文明、国际交流与公共生活改善来论证。';
   const key = topicPhrases[0] || '该命题';
   const key2 = topicPhrases[1] || '另一端';
   if (topicType.code === 'relation') return `本文主张：处理“${key}—${key2}”不能二选一，应在条件与边界中作动态判断。`;
@@ -3306,6 +3435,14 @@ function buildTopicThesis(topic, topicType, topicPhrases) {
 }
 
 function buildTopicOutline(topic, topicType, topicPhrases, thesis) {
+  if (isExpoThemeTopic(topic)) {
+    return [
+      `第一段：直接提出主题，并说明它不是口号，而是世博会的价值方向。中心论点：${thesis}`,
+      '第二段：从城市文明和人的生活角度论证主题必要性，避免只写热闹场面。',
+      '第三段：写具体设想，如绿色交通、未来社区、水岸上海、少年城市等板块。',
+      '第四段：回到上海的开放气质和世界交流，升华为城市未来责任。'
+    ];
+  }
   const key = topicPhrases[0] || '该命题';
   const key2 = topicPhrases[1] || key;
   return [
@@ -3318,6 +3455,13 @@ function buildTopicOutline(topic, topicType, topicPhrases, thesis) {
 }
 
 function buildStanceOptions(topic, topicType, topicPhrases) {
+  if (isExpoThemeTopic(topic)) {
+    return [
+      { title: '方案A：城市生活型', thesis: '主题聚焦“城市让生活更美好”，突出人的尺度与公共服务。', risk: '风险：容易写得温和，需补国际交流高度。' },
+      { title: '方案B：绿色未来型', thesis: '主题聚焦绿色城市与可持续发展，突出未来责任。', risk: '风险：容易只谈环保，需补文化与生活维度。' },
+      { title: '方案C：共享文明型', thesis: '主题聚焦世界共享城市文明，兼顾上海开放与全球合作。', risk: '风险：概念较大，必须写具体展馆设想。' }
+    ];
+  }
   const key = topicPhrases[0] || '该题核心概念';
   const key2 = topicPhrases[1] || key;
   return [
@@ -3328,6 +3472,14 @@ function buildStanceOptions(topic, topicType, topicPhrases) {
 }
 
 function buildExamReadySentences(topic, topicType, topicPhrases) {
+  if (isExpoThemeTopic(topic)) {
+    return {
+      opening: '开篇直接给主题：我为2010年上海世博会确立的主题是“城市，让世界共享更好的生活”。',
+      thesis: '本文主张：这一主题能把上海经验、世界交流与未来城市生活统一起来。',
+      turning: '然而，主题若只停留在响亮口号上，就无法支撑真正的论证，必须落到展馆设计与公共生活设想。',
+      closing: '结尾回到世博会使命：让世界在上海相遇，也让城市重新思考如何服务人的生活。'
+    };
+  }
   const key = topicPhrases[0] || '该命题';
   const key2 = topicPhrases[1] || '另一端概念';
   const relationTurn = `诚然，若只强调一端，判断会更省力；然而，题目的难点恰在于处理两端张力。`;
@@ -3344,6 +3496,25 @@ function buildExamReadySentences(topic, topicType, topicPhrases) {
 }
 
 function buildExamTemplateSets(topic, topicType, topicPhrases) {
+  if (isExpoThemeTopic(topic)) {
+    return {
+      openings: [
+        '我为2010年上海世博会确立的主题是：“城市，让世界共享更好的生活”。',
+        '一个好的世博主题，不应只是欢迎辞，而应能回答未来城市为何而建、为谁而建。',
+        '上海世博会的主题，应当把上海的开放气质、世界的文明交流与普通人的生活改善连接起来。'
+      ],
+      turnings: [
+        '然而，展示先进技术并不等于完成世博使命，关键在于技术能否转化为人的生活质量。',
+        '进一步看，世博会不是各国展品的简单陈列，而是不同文明共同讨论未来的公共场域。',
+        '换言之，主题必须既能概括时代问题，也能组织具体展馆内容。'
+      ],
+      risings: [
+        '当城市以人的尊严、联系与创造力为尺度，世博会才真正拥有超越展览本身的意义。',
+        '这样的主题不是宣传语，而是上海向世界作出的城市文明承诺。',
+        '让世界在上海相遇，也让上海在世界目光中重新定义未来生活。'
+      ]
+    };
+  }
   const key = topicPhrases[0] || '该命题';
   const key2 = topicPhrases[1] || '另一端概念';
   const openings = [
@@ -3371,6 +3542,7 @@ function buildExamTemplateSets(topic, topicType, topicPhrases) {
 }
 
 function extractTopicPhrases(topic) {
+  if (isExpoThemeTopic(topic)) return ['上海世博会', '主题', '城市文明', '共享生活'];
   const cn = (topic.match(/[\u4e00-\u9fa5]{2,}/g) || []);
   return dedupeArray(cn).slice(0, 8);
 }
