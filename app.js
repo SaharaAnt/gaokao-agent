@@ -1,6 +1,19 @@
 ﻿const EXAM_MODE_DURATION_SEC = 25 * 60;
 const EXAM_MODE_MAX_WORDS = 800;
 const ESSAY_FAVORITES_STORAGE_KEY = 'gaokao_essay_favorites_v1';
+const TRAINING_STATS_STORAGE_KEY = 'gaokao_training_stats_v1';
+const PATH_TRAINING_STORAGE_KEY = 'gaokao_path_training_v1';
+const ERROR_BOOK_STORAGE_KEY = 'gaokao_error_book_v1';
+
+const TIMELINE_SCORE_GUIDE = {
+  '2025': '重点看“概念链条完整度”：是否同时处理“专-转-传”，并对“必定”给出条件判断。',
+  '2024': '重点看“价值标准清晰度”：是否区分“认可度”与“价值本体”，并处理多数与真理关系。',
+  '2023': '重点看“动机结构层次”：是否写出好奇心之外的责任感、问题意识与价值目标。',
+  '2022': '重点看“关系辩证”：发问与结论是否互相支撑，而非二选一站队。',
+  '2021': '重点看“时间与实践”：是否避免把时间当唯一标准，写出实践检验价值。',
+  '2020': '重点看“偶然与作为”：是否从“意外”过渡到“人的回应能力与组织能力”。',
+  '2019': '重点看“认识路径”：是否由比较进入本质解释，而非只做感性抒情。'
+};
 
 const AGENT_SAMPLE_TOPICS = [
   '真正的自由不是没有约束，而是在约束中作出自觉选择。',
@@ -35,6 +48,102 @@ const ESSAY_SAMPLE_LIST = [
     tag: '上海风格 / 价值判断',
     categories: ['问题式命题', '价值判断题'],
     content: DEMO_CASE_DRAFT_HIGH
+  },
+  {
+    id: 'model-recognition-2024',
+    title: '认可度之外（2024）',
+    topic: '生活中，人们常用认可度判别事物，区分高下。请写一篇文章，谈谈你对“认可度”的认识和思考。',
+    tag: '上海风格 / 价值判断',
+    categories: ['价值判断题'],
+    content: [
+      '认可度是社会协作中的快筛机制，却不是价值本体。多数人的选择可以提高效率，但不能自动等于真理。',
+      '若把认可度直接当成价值标准，容易产生“流行即正确”的误判。许多真正有创造力的观点，起初往往处于少数。',
+      '因此，面对认可度，我们应采取“双重判断”：先看其现实效用，再审其长期价值与公共后果。这样既不盲从，也不轻率反叛。'
+    ].join('\n\n')
+  },
+  {
+    id: 'model-explore-2023',
+    title: '不止好奇心（2023）',
+    topic: '一个人乐意去探索陌生世界，仅仅是因为好奇心吗？',
+    tag: '上海风格 / 问题式',
+    categories: ['问题式命题', '关系辩证题'],
+    content: [
+      '好奇心是探索的起点，但不是全部动力。真正持久的探索，往往还来自责任感、问题意识与价值追求。',
+      '在科技、医学、教育等领域，许多探索并非“好玩”驱动，而是对现实难题的回应。没有这种责任维度，探索就可能停留在浅层尝鲜。',
+      '因此，探索的深度取决于动机结构：好奇心点火，责任感续航，价值目标定向。三者合力，才能让陌生世界真正转化为新的认知与实践。'
+    ].join('\n\n')
+  },
+  {
+    id: 'model-chinese-taste-2019',
+    title: '在比较中发现中国味（2019）',
+    topic: '这段话可以启发人们如何去认识事物。请写一篇文章，谈谈你对上述材料的思考和感悟。',
+    tag: '上海风格 / 认识论',
+    categories: ['问题式命题', '关系辩证题'],
+    content: [
+      '认识“自我”，往往离不开“他者”。当我们接触不同文化与风格，原本习焉不察的特征才会被重新照亮。',
+      '比较不是否定自身，而是提供参照系。正是在异同辨析中，我们才能从“感到不同”走向“解释何以不同”。',
+      '因此，成熟的认识路径应是：在开放中保持主体，在比较中形成判断，在反思中完成自我确认。'
+    ].join('\n\n')
+  },
+  {
+    id: 'model-question-conclusion-2022',
+    title: '发问与结论（2022）',
+    topic: '小时候人们喜欢发问，长大后往往看重结论。对此，有人感到担忧，有人觉得正常，你有怎样的思考？',
+    tag: '上海风格 / 关系辩证',
+    categories: ['关系辩证题'],
+    content: [
+      '发问与结论并非对立，而是认知链条中的两个环节。没有问题意识，结论容易僵化；没有结论沉淀，问题会流于空转。',
+      '成长带来的并非“提问消失”，而应是“提问升级”：从情绪化追问走向结构化追问，从零散疑惑走向问题框架。',
+      '真正值得担忧的不是重视结论，而是把结论当终点。好的学习者，应在结论之后继续追问其边界与前提。'
+    ].join('\n\n')
+  },
+  {
+    id: 'model-value-time-2021',
+    title: '时间与价值（2021）',
+    topic: '有人说，经过时间的沉淀，事物的价值才能被人们认识；也有人认为不尽如此。你怎么看？',
+    tag: '上海风格 / 价值判断',
+    categories: ['价值判断题', '关系辩证题'],
+    content: [
+      '时间会过滤噪音，却不自动生产价值。价值能否被看见，更取决于实践中的检验与主体的判断能力。',
+      '有些价值需要时间显影，如经典作品；也有些价值必须在当下行动中被确认，如公共责任与制度改进。',
+      '因此，“时间沉淀”是条件之一，不是唯一标准。判断价值，应把时间维度与实践维度结合起来。'
+    ].join('\n\n')
+  },
+  {
+    id: 'model-be-needed-2018',
+    title: '被需要与自我价值（2018）',
+    topic: '这种“被需要”的心态普遍存在，对此你有怎样的认识？',
+    tag: '上海风格 / 价值论',
+    categories: ['价值判断题'],
+    content: [
+      '“被需要”体现了人对关系与意义的追求，本身并不可疑。问题在于：这种需要是建立在真实贡献上，还是建立在外部认可上。',
+      '若只追求被看见，容易陷入表演化自我；若把被需要理解为承担责任，就能在服务他人的过程中完成自我成长。',
+      '所以，“被需要”应从情绪诉求升级为行动伦理：以真实能力回应真实问题，让价值在实践中成立。'
+    ].join('\n\n')
+  },
+  {
+    id: 'model-free-unfree-2014',
+    title: '自由与不自由（2014）',
+    topic: '你可以选择穿越沙漠的道路和方式，所以你是自由的；你必须穿越这片沙漠，所以你又是不自由的。',
+    tag: '上海风格 / 辩证论证',
+    categories: ['关系辩证题'],
+    content: [
+      '自由不是没有约束，而是在约束中作出自觉选择。题目中的“不自由”给出客观边界，“自由”体现主体能动。',
+      '若否认边界，自由会沦为空想；若否认选择，不自由会滑向宿命。成熟立场应把两者放在同一结构中理解。',
+      '因此，真正的自由，是在必须面对现实的前提下，仍能选择路径、承担后果并不断修正。'
+    ].join('\n\n')
+  },
+  {
+    id: 'model-special-to-classic-2025',
+    title: '从“专”到“传”（2025）',
+    topic: '由“专”到“传”，必定要经过“转”吗？',
+    tag: '上海风格 / 新题型',
+    categories: ['问题式命题', '关系辩证题', '价值判断题'],
+    content: [
+      '“专”保证深度，“转”扩大触达，“传”沉淀经典。三者不是线性流水线，而是动态互构关系。',
+      '“转”常常是“专”走向公共的桥梁，但并非唯一通道。若转化失真，传播越广反而离“传”越远；若转化得当，可激发更深层阅读。',
+      '因此，关键不在是否“必经”，而在转化质量：能否在可理解与不降格之间取得平衡。'
+    ].join('\n\n')
   }
 ];
 
@@ -60,6 +169,7 @@ document.addEventListener('DOMContentLoaded', () => {
   safeInit(initCounterAnimation);
   safeInit(initCards);
   safeInit(initCategoryNav);
+  safeInit(initGenerateEssayQuick);
   safeInit(initAgentWorkbench);
   safeInit(initEvolutionOverview);
   safeInit(initTimeline);
@@ -171,12 +281,17 @@ function initAgentWorkbench() {
   const topicInput = document.getElementById('essayTopicInput');
   const draftInput = document.getElementById('essayDraftInput');
   const analyzeBtn = document.getElementById('analyzeTopicBtn');
+  const generateFullEssayBtn = document.getElementById('generateFullEssayBtn');
+  const casePoolSelect = document.getElementById('casePoolSelect');
   const sampleBtn = document.getElementById('sampleTopicBtn');
   const randomTopicBtn = document.getElementById('randomTopicBtn');
   const showDemoCardBtn = document.getElementById('showDemoCardBtn');
   const copyBtn = document.getElementById('copyAgentResultBtn');
   const offTopicCheckBtn = document.getElementById('offTopicCheckBtn');
   const scoreDraftBtn = document.getElementById('scoreDraftBtn');
+  const improveDraftBtn = document.getElementById('improveDraftBtn');
+  const regressionTestBtn = document.getElementById('regressionTestBtn');
+  const baselineCheckBtn = document.getElementById('baselineCheckBtn');
   const resultContainer = document.getElementById('agentResult');
   const essayFilterBar = document.getElementById('essayFilterBar');
   const essaySampleList = document.getElementById('essaySampleList');
@@ -202,6 +317,8 @@ function initAgentWorkbench() {
     renderAgentResult(analyzeEssayTopic(topic), resultContainer);
   });
 
+  bindGenerateEssayButton(generateFullEssayBtn, topicInput, draftInput, resultContainer, examWordCount, casePoolSelect);
+
   sampleBtn?.addEventListener('click', () => { topicInput.value = AGENT_SAMPLE_TOPICS[Math.floor(Math.random() * AGENT_SAMPLE_TOPICS.length)]; topicInput.focus(); });
   randomTopicBtn?.addEventListener('click', () => {
     if (!Array.isArray(TIMELINE_DATA) || !TIMELINE_DATA.length) return;
@@ -218,7 +335,11 @@ function initAgentWorkbench() {
     const draft = draftInput.value.trim();
     if (!topic) return void (resultContainer.innerHTML = '<p class="agent-empty">请先输入作文题目。</p>');
     if (!draft) return void (resultContainer.innerHTML = '<p class="agent-empty">请先粘贴作文草稿。</p>');
-    try { renderOffTopicReport(runOffTopicCheck(topic, draft), resultContainer); }
+    try {
+      const report = runOffTopicCheck(topic, draft);
+      recordErrorBookEntry({ topic, draft, offTopic: report, source: 'offtopic' });
+      renderOffTopicReport(report, resultContainer);
+    }
     catch (e) { resultContainer.innerHTML = `<p class="agent-empty">防跑题检查失败：${escapeHtml(e?.message || '未知错误')}</p>`; }
   });
 
@@ -227,7 +348,30 @@ function initAgentWorkbench() {
     const draft = draftInput.value.trim();
     if (!topic) return void (resultContainer.innerHTML = '<p class="agent-empty">请先输入作文题目。</p>');
     if (!draft) return void (resultContainer.innerHTML = '<p class="agent-empty">请先粘贴作文草稿。</p>');
-    renderScoreReport(scoreEssayDraft(topic, draft), resultContainer);
+    const score = scoreEssayDraft(topic, draft);
+    updateTrainingStats(score.dimensions);
+    recordErrorBookEntry({ topic, draft, score, offTopic: score.offTopic, source: 'score' });
+    renderScoreReport(score, resultContainer);
+  });
+
+  improveDraftBtn?.addEventListener('click', () => {
+    const topic = topicInput.value.trim();
+    const draft = draftInput.value.trim();
+    if (!topic) return void (resultContainer.innerHTML = '<p class="agent-empty">请先输入作文题目。</p>');
+    if (!draft) return void (resultContainer.innerHTML = '<p class="agent-empty">请先粘贴作文草稿。</p>');
+    const boost = applyScoreBoostRewrite(topic, draft);
+    draftInput.value = boost.newDraft;
+    updateExamWordCountDisplay(draftInput, examWordCount);
+    updateTrainingStats(boost.after.dimensions);
+    renderScoreBoostReport(boost, resultContainer);
+  });
+
+  baselineCheckBtn?.addEventListener('click', () => {
+    renderBaselineCheckReport(runBaselineHealthCheck(), resultContainer);
+  });
+
+  regressionTestBtn?.addEventListener('click', () => {
+    renderRegressionReport(runRegressionSuite(), resultContainer);
   });
 
   copyBtn?.addEventListener('click', async () => { const t = resultContainer.innerText.trim(); if (t) { try { await navigator.clipboard.writeText(t); } catch (_) {} } });
@@ -263,6 +407,35 @@ function initAgentWorkbench() {
   });
 
   resultContainer.addEventListener('click', (e) => {
+    const convertBtn = e.target.closest('.convert-four-block-btn');
+    if (convertBtn) {
+      const topic = topicInput.value.trim();
+      if (!topic) return;
+      const analysis = analyzeEssayTopic(topic);
+      const draft = buildDraftFromFourBlocks(analysis);
+      draftInput.value = draft;
+      updateExamWordCountDisplay(draftInput, examWordCount);
+      resultContainer.innerHTML = '<p class="agent-empty">已根据“出题人意图 + 三步拆题 + 必答清单 + 模板”生成草稿骨架，可直接续写。</p>';
+      return;
+    }
+
+    const tplBtn = e.target.closest('.template-use-btn');
+    if (tplBtn) {
+      const topic = topicInput.value.trim();
+      if (!topic) return;
+      const analysis = analyzeEssayTopic(topic);
+      const kind = tplBtn.dataset.templateKind || 'opening';
+      const idx = parseInt(tplBtn.dataset.templateIndex || '0', 10);
+      const pool = kind === 'turning'
+        ? (analysis.examTemplateSets?.turnings || [])
+        : (kind === 'rising' ? (analysis.examTemplateSets?.risings || []) : (analysis.examTemplateSets?.openings || []));
+      const sentence = pool[idx] || pool[0];
+      if (!sentence) return;
+      draftInput.value = injectTemplateIntoDraft(draftInput.value, sentence, kind);
+      updateExamWordCountDisplay(draftInput, examWordCount);
+      return;
+    }
+
     const btn = e.target.closest('.gen-outline-draft-btn');
     if (btn) {
       const topic = topicInput.value.trim();
@@ -272,6 +445,89 @@ function initAgentWorkbench() {
       if (old) old.remove();
       resultContainer.insertAdjacentHTML('beforeend', renderOutlineDraftBlock(p));
       draftInput.value = p.map((x) => x.join(' ')).join('\n\n');
+      updateExamWordCountDisplay(draftInput, examWordCount);
+      return;
+    }
+
+    const triadBtn = e.target.closest('.triad-outline-btn');
+    if (triadBtn) {
+      const topic = topicInput.value.trim();
+      if (!topic) return;
+      const analysis = analyzeEssayTopic(topic);
+      const draft = buildTriadTrainingOutlineCard(analysis);
+      draftInput.value = draft;
+      updateExamWordCountDisplay(draftInput, examWordCount);
+      resultContainer.innerHTML = '<p class="agent-empty">已生成“三维训练提纲卡”，请直接扩写为完整作文。</p>';
+      return;
+    }
+
+    const highScoreBtn = e.target.closest('.sh-highscore-card-btn');
+    if (highScoreBtn) {
+      const card = buildHighScoreChecklistDraft();
+      draftInput.value = card;
+      updateExamWordCountDisplay(draftInput, examWordCount);
+      resultContainer.innerHTML = '<p class="agent-empty">已写入“上海一类卷考前清单”，可按清单逐段扩写。</p>';
+      return;
+    }
+
+    const threePathBtn = e.target.closest('.three-path-card-btn');
+    if (threePathBtn) {
+      const topic = topicInput.value.trim();
+      if (!topic) return;
+      const analysis = analyzeEssayTopic(topic);
+      draftInput.value = buildThreePathDraft(analysis);
+      updateExamWordCountDisplay(draftInput, examWordCount);
+      resultContainer.innerHTML = '<p class="agent-empty">已写入“三路径深度思辨草稿”，可直接扩写成800字作文。</p>';
+      return;
+    }
+
+    const pathWriteBtn = e.target.closest('.path-step-write-btn');
+    if (pathWriteBtn) {
+      const topic = topicInput.value.trim();
+      if (!topic) return;
+      const step = parseInt(pathWriteBtn.dataset.pathStep || '1', 10);
+      const analysis = analyzeEssayTopic(topic);
+      draftInput.value = appendPathStepTemplate(draftInput.value, analysis, step);
+      updateExamWordCountDisplay(draftInput, examWordCount);
+      return;
+    }
+
+    const pathCheckBtn = e.target.closest('.path-step-check-btn');
+    if (pathCheckBtn) {
+      const topic = topicInput.value.trim();
+      const draft = draftInput.value.trim();
+      if (!topic || !draft) return;
+      const step = parseInt(pathCheckBtn.dataset.pathStep || '1', 10);
+      const analysis = analyzeEssayTopic(topic);
+      const result = evaluatePathStep(step, analysis, draft);
+      const state = getPathTrainingState(topic);
+      if (result.pass) {
+        state.completed[step] = true;
+        state.unlocked = Math.max(state.unlocked, Math.min(3, step + 1));
+      }
+      state.updatedAt = Date.now();
+      savePathTrainingState(topic, state);
+      renderAgentResult(analyzeEssayTopic(topic), resultContainer);
+      renderPathTrainingFeedback(resultContainer, result.pass, result.message);
+      return;
+    }
+
+    const pathResetBtn = e.target.closest('.path-reset-btn');
+    if (pathResetBtn) {
+      const topic = topicInput.value.trim();
+      if (!topic) return;
+      resetPathTrainingState(topic);
+      renderAgentResult(analyzeEssayTopic(topic), resultContainer);
+      renderPathTrainingFeedback(resultContainer, true, '本题逐步训练进度已重置。');
+      return;
+    }
+
+    const triadTplBtn = e.target.closest('.triad-template-btn');
+    if (triadTplBtn) {
+      const sentence = triadTplBtn.dataset.templateSentence || '';
+      const targetParagraph = parseInt(triadTplBtn.dataset.targetParagraph || '0', 10);
+      if (!sentence) return;
+      draftInput.value = insertTemplateSentenceAtParagraph(draftInput.value, sentence, targetParagraph);
       updateExamWordCountDisplay(draftInput, examWordCount);
       return;
     }
@@ -289,6 +545,83 @@ function initAgentWorkbench() {
       draftInput.value = replaced.newDraft;
       updateExamWordCountDisplay(draftInput, examWordCount);
       renderOffTopicReport(runOffTopicCheck(topic, replaced.newDraft), resultContainer);
+      return;
+    }
+
+    const gapFixBtn = e.target.closest('.triad-gap-fix-btn');
+    if (gapFixBtn) {
+      const topic = topicInput.value.trim();
+      const draft = draftInput.value.trim();
+      if (!topic || !draft) return;
+      const report = runOffTopicCheck(topic, draft);
+      const fixed = applyTriadGapFix(topic, draft, report);
+      draftInput.value = fixed.newDraft;
+      updateExamWordCountDisplay(draftInput, examWordCount);
+      if (typeof fixed.highlightStart === 'number' && typeof fixed.highlightEnd === 'number') {
+        draftInput.focus();
+        draftInput.setSelectionRange(fixed.highlightStart, fixed.highlightEnd);
+      }
+      renderOffTopicReport(runOffTopicCheck(topic, fixed.newDraft), resultContainer);
+      return;
+    }
+
+    const paraRewriteBtn = e.target.closest('.paragraph-rewrite-btn');
+    if (paraRewriteBtn) {
+      const topic = topicInput.value.trim();
+      const draft = draftInput.value.trim();
+      if (!topic || !draft) return;
+      const idx = parseInt(paraRewriteBtn.dataset.paragraphIndex || '-1', 10);
+      const reportType = paraRewriteBtn.dataset.reportType || 'offtopic';
+      const report = runOffTopicCheck(topic, draft);
+      const advice = report.paragraphAdvice?.[idx];
+      if (!advice) return;
+      const rewritten = rewriteParagraphByAdvice(topic, draft, advice);
+      if (!rewritten.ok) return;
+      draftInput.value = rewritten.newDraft;
+      updateExamWordCountDisplay(draftInput, examWordCount);
+      if (typeof rewritten.highlightStart === 'number' && typeof rewritten.highlightEnd === 'number') {
+        draftInput.focus();
+        draftInput.setSelectionRange(rewritten.highlightStart, rewritten.highlightEnd);
+      }
+      if (reportType === 'score') {
+        const rescored = scoreEssayDraft(topic, rewritten.newDraft);
+        renderScoreReport(rescored, resultContainer);
+      } else {
+        renderOffTopicReport(runOffTopicCheck(topic, rewritten.newDraft), resultContainer);
+      }
+      return;
+    }
+
+    const boostBtn = e.target.closest('.apply-score-boost-btn');
+    if (boostBtn) {
+      const topic = topicInput.value.trim();
+      const draft = draftInput.value.trim();
+      if (!topic || !draft) return;
+      const boost = applyScoreBoostRewrite(topic, draft);
+      draftInput.value = boost.newDraft;
+      updateExamWordCountDisplay(draftInput, examWordCount);
+      updateTrainingStats(boost.after.dimensions);
+      renderScoreBoostReport(boost, resultContainer);
+      return;
+    }
+
+    const weakBtn = e.target.closest('.weak-training-btn');
+    if (weakBtn) {
+      const trainingPrompt = weakBtn.dataset.trainingPrompt || '';
+      if (!trainingPrompt) return;
+      const topic = topicInput.value.trim() || '请完成专项训练';
+      topicInput.value = `${topic}\n【专项训练】${trainingPrompt}`;
+      resultContainer.innerHTML = `<p class="agent-empty">已推送专项训练到题目输入框，点击“分析题目”开始训练。</p>`;
+      return;
+    }
+
+    const errorDrillBtn = e.target.closest('.error-drill-btn');
+    if (errorDrillBtn) {
+      const trainingPrompt = errorDrillBtn.dataset.trainingPrompt || '';
+      if (!trainingPrompt) return;
+      const topic = topicInput.value.trim() || '请完成错因专项训练';
+      topicInput.value = `${topic}\n【错因专项】${trainingPrompt}`;
+      resultContainer.innerHTML = `<p class="agent-empty">已根据高频错因推送专项训练，请点击“分析题目”或直接续写。</p>`;
     }
   });
 
@@ -326,6 +659,82 @@ function initAgentWorkbench() {
   });
 }
 
+function initGenerateEssayQuick() {
+  const topicInput = document.getElementById('essayTopicInput');
+  const draftInput = document.getElementById('essayDraftInput');
+  const resultContainer = document.getElementById('agentResult');
+  const examWordCount = document.getElementById('examWordCount');
+  const generateBtn = document.getElementById('generateFullEssayBtn');
+  const casePoolSelect = document.getElementById('casePoolSelect');
+  if (!topicInput || !draftInput || !resultContainer || !generateBtn) return;
+  bindGenerateEssayButton(generateBtn, topicInput, draftInput, resultContainer, examWordCount, casePoolSelect);
+}
+
+function bindGenerateEssayButton(btn, topicInput, draftInput, resultContainer, examWordCount, casePoolSelect) {
+  if (!btn || btn.dataset.boundGenerate === '1') return;
+  btn.dataset.boundGenerate = '1';
+  btn.addEventListener('click', () => {
+    try {
+      const topic = (topicInput?.value || '').trim();
+      if (!topic) {
+        if (resultContainer) resultContainer.innerHTML = '<p class="agent-empty">请先输入作文题目。</p>';
+        return;
+      }
+      const analysis = analyzeEssayTopic(topic);
+      const casePool = getSelectedCasePool(casePoolSelect);
+      const fullEssay = generateFullEssayDraft(topic, analysis, 800, 850, { casePool });
+      if (draftInput) draftInput.value = fullEssay;
+      updateExamWordCountDisplay(draftInput, examWordCount);
+      const offTopic = runOffTopicCheck(topic, fullEssay);
+      const score = scoreEssayDraft(topic, fullEssay);
+      updateTrainingStats(score.dimensions);
+      renderGeneratedEssayReport({
+        topic,
+        draft: fullEssay,
+        wordCount: countWords(fullEssay),
+        score,
+        offTopic
+      }, resultContainer);
+    } catch (err) {
+      const msg = err?.message || '未知错误';
+      if (resultContainer) resultContainer.innerHTML = `<p class="agent-empty">范文生成失败：${escapeHtml(msg)}</p>`;
+    }
+  });
+}
+
+window.quickGenerateEssay = () => {
+  const topicInput = document.getElementById('essayTopicInput');
+  const draftInput = document.getElementById('essayDraftInput');
+  const resultContainer = document.getElementById('agentResult');
+  const examWordCount = document.getElementById('examWordCount');
+  const casePoolSelect = document.getElementById('casePoolSelect');
+  if (!topicInput || !draftInput || !resultContainer) return;
+  try {
+    const topic = (topicInput.value || '').trim();
+    if (!topic) {
+      resultContainer.innerHTML = '<p class="agent-empty">请先输入作文题目。</p>';
+      return;
+    }
+    const analysis = analyzeEssayTopic(topic);
+    const casePool = getSelectedCasePool(casePoolSelect);
+    const fullEssay = generateFullEssayDraft(topic, analysis, 800, 850, { casePool });
+    draftInput.value = fullEssay;
+    updateExamWordCountDisplay(draftInput, examWordCount);
+    const offTopic = runOffTopicCheck(topic, fullEssay);
+    const score = scoreEssayDraft(topic, fullEssay);
+    updateTrainingStats(score.dimensions);
+    renderGeneratedEssayReport({
+      topic,
+      draft: fullEssay,
+      wordCount: countWords(fullEssay),
+      score,
+      offTopic
+    }, resultContainer);
+  } catch (err) {
+    resultContainer.innerHTML = `<p class="agent-empty">范文生成失败：${escapeHtml(err?.message || '未知错误')}</p>`;
+  }
+};
+
 function analyzeEssayTopic(topic) {
   const t = topic.toLowerCase();
   const scores = { dialectics: 0, epistemology: 0, axiology: 0, ethics: 0, other: 0, thinking: 0 };
@@ -339,21 +748,39 @@ function analyzeEssayTopic(topic) {
   if (!Object.values(scores).some((x) => x > 0)) scores.thinking = 2;
   const rankedCategories = Object.keys(scores).sort((a, b) => scores[b] - scores[a]).filter((k) => scores[k] > 0).slice(0, 3);
   const topicType = detectTopicType(topic);
-  const topicPhrases = extractTopicPhrases(topic);
+  const topicPhrases = normalizeTopicPhrases(extractTopicPhrases(topic));
+  const hiddenPremise = detectHiddenPremise(topic, topicType, topicPhrases);
+  const mustAnswerQuestions = buildMustAnswerQuestions(topic, topicType, topicPhrases, hiddenPremise);
+  const pitfalls = buildTopicPitfalls(topic, topicType, topicPhrases);
+  const examinerIntent = buildExaminerIntent(topic, topicType, topicPhrases);
+  const threeStepAnalysis = buildThreeStepAnalysis(topic, topicType, topicPhrases);
+  const mustAnswerChecklist = buildMustAnswerChecklist(topic, topicType, topicPhrases, hiddenPremise);
+  const examReadyTemplates = buildExamReadyTemplates(topic, topicType, topicPhrases);
+  const triadTrainingKit = buildTriadTrainingKit(topic, topicType, topicPhrases);
+  const threePathKit = buildThreePathMethodKit(topic, topicType, topicPhrases);
   const stanceOptions = buildStanceOptions(topic, topicType, topicPhrases);
+  const thesis = buildTopicThesis(topic, topicType, topicPhrases);
+  const outline = buildTopicOutline(topic, topicType, topicPhrases, thesis);
   return {
     topic,
+    draft,
     topicType,
     topicPhrases,
     rankedCategories,
     lensSuggestions: dedupeArray(lens).slice(0, 4),
-    thesis: '本文主张：该题应作条件化判断，先界定概念，再比较立场，最后回到边界。',
-    outline: [
-      '第一段：界定概念并提出中心论点。',
-      '第二段：展开因果论证并加入例证。',
-      '第三段：回到题目边界并完成升华。'
-    ],
+    examinerIntent,
+    threeStepAnalysis,
+    mustAnswerChecklist,
+    examReadyTemplates,
+    triadTrainingKit,
+    threePathKit,
+    hiddenPremise,
+    mustAnswerQuestions,
+    pitfalls,
+    thesis,
+    outline,
     examReadySentences: buildExamReadySentences(topic, topicType, topicPhrases),
+    examTemplateSets: buildExamTemplateSets(topic, topicType, topicPhrases),
     stanceOptions
   };
 }
@@ -368,13 +795,133 @@ function renderAgentResult(analysis, container) {
       <p>${escapeHtml(s.thesis)}</p>
       <p>${escapeHtml(s.risk)}</p>
     </div>`).join('');
+  const mustAnswers = (analysis.mustAnswerQuestions || []).map((x) => `<li>${escapeHtml(x)}</li>`).join('');
+  const pitfalls = (analysis.pitfalls || []).map((x) => `<li>${escapeHtml(x)}</li>`).join('');
+  const intentRows = (analysis.examinerIntent || []).map((x) => `<li>${escapeHtml(x)}</li>`).join('');
+  const stepRows = (analysis.threeStepAnalysis || []).map((x) => `<li>${escapeHtml(x)}</li>`).join('');
+  const checklistRows = (analysis.mustAnswerChecklist || []).map((x) => `<li>${escapeHtml(x)}</li>`).join('');
+  const triadKit = analysis.triadTrainingKit || { blocks: [], integration: [], selfCheck: [] };
+  const triadRows = (triadKit.blocks || []).map((b) => `
+    <div class="flaw-row">
+      <div class="flaw-row-top"><span>${escapeHtml(b.title || '')}</span></div>
+      <p>${escapeHtml(b.focus || '')}</p>
+      <ol>${(b.actions || []).map((x) => `<li>${escapeHtml(x)}</li>`).join('')}</ol>
+    </div>
+  `).join('');
+  const triadIntegrationRows = (triadKit.integration || []).map((x) => `<li>${escapeHtml(x)}</li>`).join('');
+  const triadCheckRows = (triadKit.selfCheck || []).map((x) => `<li>${escapeHtml(x)}</li>`).join('');
+  const triadTemplates = buildTriadTemplateSentences(analysis);
+  const triadTplBlock = `
+    <p><strong>可点击填充模板句</strong></p>
+    <div class="score-grid">
+      <div class="flaw-row">
+        <div class="flaw-row-top"><span>审题立意句</span></div>
+        <ol>${triadTemplates.openings.map((x) => `<li><span>${escapeHtml(x)}</span> <button class="agent-btn ghost triad-template-btn" type="button" data-template-sentence="${escapeHtml(x)}" data-target-paragraph="1">插入第1段</button> <button class="agent-btn ghost triad-template-btn" type="button" data-template-sentence="${escapeHtml(x)}" data-target-paragraph="2">插入第2段</button> <button class="agent-btn ghost triad-template-btn" type="button" data-template-sentence="${escapeHtml(x)}" data-target-paragraph="3">插入第3段</button></li>`).join('')}</ol>
+      </div>
+      <div class="flaw-row">
+        <div class="flaw-row-top"><span>逻辑转折句</span></div>
+        <ol>${triadTemplates.turnings.map((x) => `<li><span>${escapeHtml(x)}</span> <button class="agent-btn ghost triad-template-btn" type="button" data-template-sentence="${escapeHtml(x)}" data-target-paragraph="1">插入第1段</button> <button class="agent-btn ghost triad-template-btn" type="button" data-template-sentence="${escapeHtml(x)}" data-target-paragraph="2">插入第2段</button> <button class="agent-btn ghost triad-template-btn" type="button" data-template-sentence="${escapeHtml(x)}" data-target-paragraph="3">插入第3段</button></li>`).join('')}</ol>
+      </div>
+      <div class="flaw-row">
+        <div class="flaw-row-top"><span>升华收束句</span></div>
+        <ol>${triadTemplates.closings.map((x) => `<li><span>${escapeHtml(x)}</span> <button class="agent-btn ghost triad-template-btn" type="button" data-template-sentence="${escapeHtml(x)}" data-target-paragraph="1">插入第1段</button> <button class="agent-btn ghost triad-template-btn" type="button" data-template-sentence="${escapeHtml(x)}" data-target-paragraph="2">插入第2段</button> <button class="agent-btn ghost triad-template-btn" type="button" data-template-sentence="${escapeHtml(x)}" data-target-paragraph="3">插入第3段</button></li>`).join('')}</ol>
+      </div>
+    </div>
+  `;
+  const highScoreGuide = buildShanghaiHighScoreGuide();
+  const highScoreWeights = highScoreGuide.weights.map((x) => `<li>${escapeHtml(x)}</li>`).join('');
+  const highScoreStruct = highScoreGuide.structures.map((x) => `<li>${escapeHtml(x)}</li>`).join('');
+  const highScoreDebate = highScoreGuide.debateTips.map((x) => `<li>${escapeHtml(x)}</li>`).join('');
+  const highScoreLang = highScoreGuide.languageTips.map((x) => `<li>${escapeHtml(x)}</li>`).join('');
+  const highScorePit = highScoreGuide.pitfalls.map((x) => `<li>${escapeHtml(x)}</li>`).join('');
+  const threePathKit = analysis.threePathKit || { concept: [], classify: [], reality: [], caution: '' };
+  const pathTraining = getPathTrainingState(analysis.topic);
+  const pathStepRows = renderPathStepRows(pathTraining);
+  const conceptRows = (threePathKit.concept || []).map((x) => `<li>${escapeHtml(x)}</li>`).join('');
+  const classifyRows = (threePathKit.classify || []).map((x) => `<li>${escapeHtml(x)}</li>`).join('');
+  const realityRows = (threePathKit.reality || []).map((x) => `<li>${escapeHtml(x)}</li>`).join('');
+  const readyTpl = analysis.examReadyTemplates || { opening: '', turning: '', rising: '' };
+  const openingTpl = (analysis.examTemplateSets?.openings || []).map((x, idx) =>
+    `<li><span>${escapeHtml(x)}</span> <button class="agent-btn ghost template-use-btn" type="button" data-template-kind="opening" data-template-index="${idx}">用作开头</button></li>`
+  ).join('');
+  const turningTpl = (analysis.examTemplateSets?.turnings || []).map((x, idx) =>
+    `<li><span>${escapeHtml(x)}</span> <button class="agent-btn ghost template-use-btn" type="button" data-template-kind="turning" data-template-index="${idx}">插入转折</button></li>`
+  ).join('');
+  const risingTpl = (analysis.examTemplateSets?.risings || []).map((x, idx) =>
+    `<li><span>${escapeHtml(x)}</span> <button class="agent-btn ghost template-use-btn" type="button" data-template-kind="rising" data-template-index="${idx}">用作结尾</button></li>`
+  ).join('');
 
   container.innerHTML = `
     <div class="agent-result-head">
       <h3>题目分析：${escapeHtml(analysis.topic)}</h3>
       <div class="agent-tags">${tags}<span class="agent-tag">题型：${escapeHtml(analysis.topicType.name)}</span></div>
     </div>
+    <div class="agent-result-block"><h4>出题人意图（筛选什么）</h4><ul>${intentRows}</ul></div>
+    <div class="agent-result-block"><h4>三步拆题法（立刻可用）</h4><ul>${stepRows}</ul></div>
+    <div class="agent-result-block"><h4>必答清单（不答会掉档）</h4><ul>${checklistRows}</ul></div>
+    <div class="agent-result-block">
+      <h4>思辨三维训练包（审题 / 逻辑 / 语言）</h4>
+      <div class="score-grid">${triadRows}</div>
+      <p><strong>一体化落地路径</strong></p>
+      <ul>${triadIntegrationRows}</ul>
+      <p><strong>自检评分清单</strong></p>
+      <ul>${triadCheckRows}</ul>
+      ${triadTplBlock}
+      <div class="agent-actions secondary">
+        <button class="agent-btn primary triad-outline-btn" type="button">一键生成训练提纲卡</button>
+      </div>
+    </div>
+    <div class="agent-result-block">
+      <h4>上海一类卷冲刺卡（63-70）</h4>
+      <p><strong>评分命脉（权重）</strong></p>
+      <ul>${highScoreWeights}</ul>
+      <p><strong>结构模板</strong></p>
+      <ul>${highScoreStruct}</ul>
+      <p><strong>思辨与论证</strong></p>
+      <ul>${highScoreDebate}</ul>
+      <p><strong>语言规范</strong></p>
+      <ul>${highScoreLang}</ul>
+      <p><strong>避坑清单</strong></p>
+      <ul>${highScorePit}</ul>
+      <p><strong>高分口诀</strong>：${escapeHtml(highScoreGuide.mantra)}</p>
+      <div class="agent-actions secondary">
+        <button class="agent-btn primary sh-highscore-card-btn" type="button">一键写入考前清单</button>
+      </div>
+    </div>
+    <div class="agent-result-block">
+      <h4>三路径深度思辨训练</h4>
+      <p><strong>路径一：概念辨析法</strong></p>
+      <ul>${conceptRows}</ul>
+      <p><strong>路径二：分类讨论法</strong></p>
+      <ul>${classifyRows}</ul>
+      <p><strong>路径三：现实关联法</strong></p>
+      <ul>${realityRows}</ul>
+      <p><strong>使用提醒</strong>：${escapeHtml(threePathKit.caution || '紧扣题眼，具体问题具体分析。')}</p>
+      <div class="agent-actions secondary">
+        <button class="agent-btn primary three-path-card-btn" type="button">一键写入三路径草稿</button>
+      </div>
+    </div>
+    <div class="agent-result-block">
+      <h4>逐步训练模式（长期提分）</h4>
+      <p>当前进度：${escapeHtml(pathTraining.statusText)}</p>
+      <div class="score-grid">${pathStepRows}</div>
+      <div class="agent-actions secondary">
+        <button class="agent-btn ghost path-reset-btn" type="button">重置本题进度</button>
+      </div>
+    </div>
+    <div class="agent-result-block">
+      <h4>考场可用模板（直接套）</h4>
+      <p>首句模板：${escapeHtml(readyTpl.opening)}</p>
+      <p>转折模板：${escapeHtml(readyTpl.turning)}</p>
+      <p>升华模板：${escapeHtml(readyTpl.rising)}</p>
+      <div class="agent-actions secondary">
+        <button class="agent-btn primary convert-four-block-btn" type="button">一键转草稿骨架</button>
+      </div>
+    </div>
+    <div class="agent-result-block"><h4>隐含前提</h4><p>${escapeHtml(analysis.hiddenPremise || '无')}</p></div>
+    <div class="agent-result-block"><h4>必答问题（不答会掉档）</h4><ul>${mustAnswers}</ul></div>
     <div class="agent-result-block"><h4>审题切口</h4><ul>${lens}</ul></div>
+    <div class="agent-result-block"><h4>高分避坑</h4><ul>${pitfalls}</ul></div>
     <div class="agent-result-block"><h4>三种立场可选</h4>${stances}</div>
     <div class="agent-result-block"><h4>核心立意</h4><p>${escapeHtml(analysis.thesis)}</p></div>
     <div class="agent-result-block"><h4>三段式骨架</h4><ol>${outline}</ol></div>
@@ -382,31 +929,43 @@ function renderAgentResult(analysis, container) {
       <h4>考场可写句</h4>
       <p>开头句：${escapeHtml(analysis.examReadySentences.opening)}</p>
       <p>中心句：${escapeHtml(analysis.examReadySentences.thesis)}</p>
+      <p>转折句：${escapeHtml(analysis.examReadySentences.turning || '')}</p>
       <p>结尾句：${escapeHtml(analysis.examReadySentences.closing)}</p>
       <div class="agent-actions secondary"><button class="agent-btn primary gen-outline-draft-btn" type="button">一键生成三段提纲草稿</button></div>
+      <div class="agent-result-block">
+        <h4>考场模板库（可直接套用）</h4>
+        <p><strong>首句模板</strong></p><ol>${openingTpl}</ol>
+        <p><strong>转折模板</strong></p><ol>${turningTpl}</ol>
+        <p><strong>升华模板</strong></p><ol>${risingTpl}</ol>
+      </div>
     </div>`;
 }
 
 function generateThreeParagraphDraft(analysis) {
   const key = analysis.topicPhrases[0] || '该命题';
   const key2 = analysis.topicPhrases[1] || key;
+  const rise = analysis.topicType.code === 'value'
+    ? '结尾升华到“价值排序与公共后果”。'
+    : (analysis.topicType.code === 'relation'
+      ? '结尾升华到“在张力中达成更高统一”。'
+      : '结尾升华到“个体判断与时代实践的连接”。');
   return [
     [
-      `面对“${analysis.topic}”，本文先界定“${key}”的含义与适用范围。`,
+      `开篇先回应题目：“${key}”不能被直觉化理解，需先界定概念。`,
       `${analysis.stanceOptions?.[2]?.thesis || analysis.thesis}`,
-      '本段结尾明确中心论点与判断标准。'
+      '段末明确判断标准：在什么前提下成立，在什么前提下不成立。'
     ],
     [
-      `第二段围绕“${key}”展开因果链：前提成立时会产生何种结果。`,
-      '加入一个可分析例证，并说明“为什么这个例子支持你的观点”。',
+      `中段围绕“${key}”展开“因为-所以-因此”因果链，并给出可分析例证。`,
+      '补一处辩证转折：诚然……然而……，防止单边论证。',
       analysis.topicType.code === 'relation'
-        ? `同时处理“${key}”与“${key2}”的双边关系，避免单边站队。`
-        : '补充一次反方回应，提升论证完整性。'
+        ? `同时处理“${key}”与“${key2}”的双边关系，解释二者如何互相制约与转化。`
+        : '补充一次反方回应并回收，提升论证完整性。'
     ],
     [
-      `第三段回到题目边界：指出“${key}”并非绝对成立。`,
-      '给出条件化结论，避免“唯一/必然”等绝对化词语。',
-      '最后回扣题眼并完成价值提升。'
+      `收束时回到题目问法，指出“${key}”并非绝对成立。`,
+      '给出条件化结论（边界/前提/例外），避免“唯一、必然、绝对”。',
+      rise
     ]
   ];
 }
@@ -418,6 +977,685 @@ function renderOutlineDraftBlock(paragraphs) {
       <ol>${s.map((x) => `<li>${escapeHtml(x)}</li>`).join('')}</ol>
     </div>`).join('');
   return `<div class="agent-result-block outline-draft-block"><h4>三段提纲草稿（每段2-3句）</h4><div class="score-grid">${items}</div></div>`;
+}
+
+function buildDraftFromFourBlocks(analysis) {
+  const topic = analysis.topic || '该题';
+  const key = analysis.topicPhrases?.[0] || '核心概念';
+  const opening = analysis.examReadyTemplates?.opening || analysis.examReadySentences?.opening || '先界定概念再立论。';
+  const turning = analysis.examReadyTemplates?.turning || analysis.examReadySentences?.turning || '然而，离开边界谈结论会失真。';
+  const rising = analysis.examReadyTemplates?.rising || analysis.examReadySentences?.closing || '结尾回到题目并给条件化判断。';
+  const must = analysis.mustAnswerChecklist || [];
+  const steps = analysis.threeStepAnalysis || [];
+  const triad = analysis.triadTrainingKit || { blocks: [] };
+  const triadLine = triad.blocks?.[0]?.actions?.[0] || '先拆解核心概念，再锁定题眼关系。';
+
+  const p1 = [
+    `【开篇立论】${opening}`,
+    `题目“${topic}”看似在问立场，实则在考查对“${key}”的定义与边界。`,
+    `本文主张：${analysis.thesis || '应作条件化判断。'}`
+  ].join('');
+
+  const p2 = [
+    `【中段论证】${steps[1] || '展开机制论证。'}`,
+    `按三维训练先做审题立意：${triadLine}`,
+    `先回应必答问题：${must[0] || '核心概念如何定义'}；再说明机制链：前提—机制—结果。`,
+    `${turning}`
+  ].join('');
+
+  const p3 = [
+    `【反方与边界】${must[2] || '回应反方与例外情形。'}`,
+    `在反例场景下，结论需要做边界修正，而不是绝对化表述。`,
+    `由此可见，判断的质量取决于是否可检验、可修正。`
+  ].join('');
+
+  const p4 = [
+    `【收束升华】${steps[2] || '完成高阶立意。'}`,
+    `${rising}`,
+    `回到题目问法，给出“成立条件+失效边界”的完整结论。`
+  ].join('');
+
+  return [p1, p2, p3, p4].map(ensureSentenceEnding).join('\n\n');
+}
+
+function buildTriadTrainingKit(topic, topicType, topicPhrases) {
+  const key = topicPhrases[0] || '核心概念';
+  const key2 = topicPhrases[1] || '关联概念';
+  const relationHint = topicType.code === 'relation'
+    ? `重点处理“${key}—${key2}”的对立统一关系，避免单边站队。`
+    : `把“${key}”放进条件链中判断，避免绝对化结论。`;
+  return {
+    blocks: [
+      {
+        title: '一、审题立意准确（定方向）',
+        focus: '抓“核心话题 + 思辨关系”，先定义再表态。',
+        actions: [
+          `三步拆题：圈关键词（如“${key}”）→ 判关系（对立/条件/递进）→ 锁题眼。`,
+          relationHint,
+          '立意升格：从“既要也要”升级为“有立场、有条件、有边界”。'
+        ]
+      },
+      {
+        title: '二、逻辑层次清晰（搭骨架）',
+        focus: '每段都要有可追踪逻辑链，而不是素材堆砌。',
+        actions: [
+          '优先结构：定调立论 → 双边辩证/机制展开 → 反方回应 → 条件化结论。',
+          '分论点自检：是否扣中心、是否有层次、是否不重复。',
+          '段内链条：观点 → 道理 → 素材 → 分析 → 回扣题目。'
+        ]
+      },
+      {
+        title: '三、语言表达生动（提质感）',
+        focus: '语言为思辨服务，先准确再有表现力。',
+        actions: [
+          '高频逻辑词：诚然、然而、进一步看、由此可见、换言之。',
+          '四句型轮换：对仗句、辩证句、设问句、排比句。',
+          '生动化三法：概念比喻化、时代素材融合、回到高中生真实场景。'
+        ]
+      }
+    ],
+    integration: [
+      '写作顺序：审题立意 → 结构分层 → 分论点落地 → 语言打磨。',
+      '每段至少出现一次“机制解释”或“边界修正”，防止空泛抒情。',
+      '结尾必须回扣题目问法，给“成立条件 + 失效边界”。'
+    ],
+    selfCheck: [
+      '审题：是否抓准核心概念与关系？是否避免偷换概念？',
+      '逻辑：是否有清晰结构与段内逻辑链？是否回应反方？',
+      '语言：是否口语化过重？是否有思辨标志词与句式变化？'
+    ]
+  };
+}
+
+function buildShanghaiHighScoreGuide() {
+  return {
+    weights: [
+      '立意约30%：切题、深刻、不过度绝对化。',
+      '思辨与逻辑约35%：论证严密、辩证充分、证据贴合。',
+      '结构约15%：首尾呼应、段间过渡自然。',
+      '语言约15%：准确、流畅、庄重、不过分抒情。',
+      '卷面与细节约5%：字数达标、标点规范、书写清晰。'
+    ],
+    structures: [
+      '五段通用：开头立论 + 正面论证 + 反面/辩证 + 现实拔高 + 结尾收束。',
+      '关系题首选：A价值 + B价值 + A/B统一与边界 + 时代落点。',
+      '每段段首写分论点句，段末回扣题眼，形成闭环。'
+    ],
+    debateTips: [
+      '从“是什么-为什么-怎么做”递进，不只摆素材。',
+      '例证后必须补“机制解释句”，回答“为何能证明观点”。',
+      '避免绝对化词（一定、唯一、必须），改为条件化判断。'
+    ],
+    languageTips: [
+      '多用思辨连接词：诚然、然而、进一步看、由此可见。',
+      '少口语、少网络语，保持议论文文体稳定。',
+      '可适度文采，但不堆砌辞藻，不偏离论证任务。'
+    ],
+    pitfalls: [
+      '只表态不分析：有观点无机制。',
+      '只讲单边：关系题忽视另一端价值。',
+      '素材堆砌：例子很多但不能证明论点。',
+      '结尾空喊口号：没有边界条件与现实指向。'
+    ],
+    mantra: '审题抓核心，立意有思辨，结构要清晰，论证讲逻辑，语言求得体。'
+  };
+}
+
+function buildHighScoreChecklistDraft() {
+  return [
+    '【上海一类卷考前清单】',
+    '',
+    '1. 审题与立意',
+    '先圈题眼，界定核心概念，明确“成立条件+失效边界”。',
+    '中心论点必须可检验，避免绝对化表述。',
+    '',
+    '2. 结构与段落',
+    '采用五段：开头立论、正面论证、辩证转折、现实拔高、结尾收束。',
+    '每段段首先亮分论点，段尾回扣题目。',
+    '',
+    '3. 论证与思辨',
+    '每个例证后补1句机制解释：它为何能证明观点。',
+    '至少出现一次“诚然-然而”转折，回应反方。',
+    '',
+    '4. 语言与规范',
+    '优先准确、简洁、庄重；避免口语化和空洞抒情。',
+    '字数不少于800，标点规范，结尾回扣题眼并给条件结论。',
+    '',
+    '【高分口诀】',
+    '审题抓核心，立意有思辨，结构要清晰，论证讲逻辑，语言求得体。'
+  ].join('\n');
+}
+
+function buildThreePathMethodKit(topic, topicType, topicPhrases) {
+  const key = topicPhrases[0] || '核心概念';
+  const key2 = topicPhrases[1] || '相关概念';
+  return {
+    concept: [
+      `先做“概念边界”辨析：${key}不等于常见误读，尝试用“不是……而是……”定义。`,
+      topicType.code === 'relation'
+        ? `关系题要明确“${key}”与“${key2}”并非二选一，而是条件化互补关系。`
+        : `单问句题要明确“${key}”在何种前提下成立、何种情形下失效。`,
+      '每段都回扣题眼，防止概念漂移。'
+    ],
+    classify: [
+      '先做基础分类（支持/质疑/整合），再做次级分类（动机、后果、边界）。',
+      '同一行为可有不同心理动因，分类讨论能显著拉开思辨层次。',
+      '段内结构建议：观点句 → 分类证据 → 比较分析 → 回扣中心论点。'
+    ],
+    reality: [
+      '把论证放回现实：问题在当下社会具体如何出现？谁最受影响？',
+      '用“问题-分析-对策”推进，而不是只做抽象判断。',
+      '优先可观察场景（校园、平台、技术、公共讨论），避免纸上空转。'
+    ],
+    caution: '三条路径都必须紧扣题目，不为“显深刻”而离题。'
+  };
+}
+
+function buildThreePathDraft(analysis) {
+  const topic = analysis.topic || '该题';
+  const key = analysis.topicPhrases?.[0] || '核心概念';
+  const path = analysis.threePathKit || buildThreePathMethodKit(topic, analysis.topicType || { code: 'phenomenon' }, analysis.topicPhrases || []);
+  return [
+    `【题目】${topic}`,
+    '',
+    '【路径一：概念辨析】',
+    `先界定“${key}”：${path.concept?.[0] || '先做概念边界辨析。'}`,
+    `${path.concept?.[1] || '明确成立条件与失效边界。'}`,
+    '',
+    '【路径二：分类讨论】',
+    `${path.classify?.[0] || '做基础分类与次级分类。'}`,
+    `${path.classify?.[1] || '比较不同类型的心理动因与后果。'}`,
+    '',
+    '【路径三：现实关联】',
+    `${path.reality?.[0] || '回到现实场景提出问题。'}`,
+    `${path.reality?.[1] || '用问题-分析-对策推进论证。'}`,
+    '',
+    '【收束提醒】',
+    `${path.caution || '紧扣题眼，避免离题。'}`,
+    '结尾回到题目问法，给出条件化判断。'
+  ].join('\n');
+}
+
+function loadPathTrainingMap() {
+  try {
+    const raw = localStorage.getItem(PATH_TRAINING_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch (_) {
+    return {};
+  }
+}
+
+function savePathTrainingMap(map) {
+  try { localStorage.setItem(PATH_TRAINING_STORAGE_KEY, JSON.stringify(map)); } catch (_) {}
+}
+
+function topicTrainingKey(topic) {
+  return String(topic || '').trim().slice(0, 120);
+}
+
+function getPathTrainingState(topic) {
+  const key = topicTrainingKey(topic);
+  const map = loadPathTrainingMap();
+  const state = map[key] || { unlocked: 1, completed: { 1: false, 2: false, 3: false }, updatedAt: Date.now() };
+  const completedCount = [1, 2, 3].filter((n) => !!state.completed[n]).length;
+  return {
+    ...state,
+    statusText: `已完成 ${completedCount}/3 步，当前解锁到第${state.unlocked}步`
+  };
+}
+
+function savePathTrainingState(topic, state) {
+  const key = topicTrainingKey(topic);
+  const map = loadPathTrainingMap();
+  map[key] = {
+    unlocked: clamp(Number(state.unlocked || 1), 1, 3),
+    completed: {
+      1: !!state.completed?.[1],
+      2: !!state.completed?.[2],
+      3: !!state.completed?.[3]
+    },
+    updatedAt: Number(state.updatedAt || Date.now())
+  };
+  savePathTrainingMap(map);
+}
+
+function resetPathTrainingState(topic) {
+  const key = topicTrainingKey(topic);
+  const map = loadPathTrainingMap();
+  delete map[key];
+  savePathTrainingMap(map);
+}
+
+function renderPathStepRows(state) {
+  const rows = [
+    { step: 1, name: '第1步 概念辨析', target: '写出“不是……而是……”并明确边界条件。' },
+    { step: 2, name: '第2步 分类讨论', target: '完成基础分类 + 次级分类，比较不同动因。' },
+    { step: 3, name: '第3步 现实关联', target: '用“问题-分析-对策”关联现实场景并收束。' }
+  ];
+  return rows.map((r) => {
+    const done = !!state.completed?.[r.step];
+    const unlocked = r.step <= (state.unlocked || 1);
+    return `
+      <div class="flaw-row">
+        <div class="flaw-row-top"><span>${r.name}</span><strong>${done ? '已达标' : (unlocked ? '可训练' : '未解锁')}</strong></div>
+        <p>目标：${r.target}</p>
+        <div class="agent-actions secondary">
+          <button class="agent-btn ghost path-step-write-btn" type="button" data-path-step="${r.step}" ${unlocked ? '' : 'disabled'}>写入本步模板</button>
+          <button class="agent-btn primary path-step-check-btn" type="button" data-path-step="${r.step}" ${unlocked ? '' : 'disabled'}>检测并解锁</button>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function appendPathStepTemplate(draft, analysis, step) {
+  const key = analysis.topicPhrases?.[0] || '核心概念';
+  const base = String(draft || '').trim();
+  const line = step === 1
+    ? `【概念辨析】先界定“${key}”：它不等于常见误读，而是在特定边界内成立。`
+    : (step === 2
+      ? '【分类讨论】可分为两类：一类是理性使用，另一类是依赖外部标准；同一行为背后动因不同。'
+      : '【现实关联】回到现实场景：问题如何出现、原因何在、可行对策是什么。');
+  return base ? `${base}\n\n${ensureSentenceEnding(line)}` : ensureSentenceEnding(line);
+}
+
+function evaluatePathStep(step, analysis, draft) {
+  const text = String(draft || '');
+  const words = countWords(text);
+  if (step === 1) {
+    const pass = /(不是|并非).*(而是)/.test(text) && /(边界|前提|条件|内涵)/.test(text) && words >= 120;
+    return { pass, message: pass ? '第1步达标，已解锁第2步。' : '第1步未达标：请补“不是…而是…”与边界条件。' };
+  }
+  if (step === 2) {
+    const pass = /(分类|类型|其一|其二|一类|另一类|分别)/.test(text) && /(动因|心理|后果|差异)/.test(text) && words >= 220;
+    return { pass, message: pass ? '第2步达标，已解锁第3步。' : '第2步未达标：请补分类框架与比较分析。' };
+  }
+  const pass = /(现实|社会|校园|平台|时代)/.test(text) && /(问题|原因|对策|路径|做法)/.test(text) && words >= 320;
+  return { pass, message: pass ? '第3步达标，三路径训练完成。' : '第3步未达标：请补“问题-分析-对策”现实链。' };
+}
+
+function renderPathTrainingFeedback(container, pass, msg) {
+  if (!container) return;
+  const cls = pass ? 'low' : 'high';
+  container.insertAdjacentHTML('afterbegin', `<div class="agent-result-block"><p class="agent-para-issues ${cls}">${escapeHtml(msg)}</p></div>`);
+}
+
+function buildTriadTrainingOutlineCard(analysis) {
+  const key = analysis.topicPhrases?.[0] || '核心概念';
+  const key2 = analysis.topicPhrases?.[1] || '关联概念';
+  const relationLine = analysis.topicType.code === 'relation'
+    ? `明确“${key}—${key2}”的关系：不是二选一，而是张力中的统一。`
+    : `把“${key}”放进条件链：何时成立、何时失效。`;
+  const p1 = [
+    `【审题立意】先界定“${key}”的内涵与边界。`,
+    relationLine,
+    `中心论点：${analysis.thesis || '给出条件化判断，不绝对化。'}`
+  ].join('');
+  const p2 = [
+    '【逻辑结构】用“前提—机制—结果”搭建论证链。',
+    '给出1个现实例证，并解释它为什么支持你的判断。',
+    '加入“诚然—然而”转折，回应反方并回扣题眼。'
+  ].join('');
+  const p3 = [
+    '【语言表达】用一组对仗或排比句提升表达质感。',
+    '结尾加入“价值意义 + 边界条件”双句收束。',
+    '回到题目问法：给出可检验、可修正的结论。'
+  ].join('');
+  return [ensureSentenceEnding(p1), ensureSentenceEnding(p2), ensureSentenceEnding(p3)].join('\n\n');
+}
+
+function buildTriadTemplateSentences(analysis) {
+  const key = analysis.topicPhrases?.[0] || '该命题';
+  const key2 = analysis.topicPhrases?.[1] || '另一端';
+  const isRelation = analysis.topicType.code === 'relation';
+  return {
+    openings: [
+      `先界定“${key}”的内涵与边界，再讨论其成立条件。`,
+      isRelation ? `题目的难点不在二选一，而在处理“${key}—${key2}”的张力。` : `与其急于表态，不如先澄清“${key}”究竟指什么。`
+    ],
+    turnings: [
+      '诚然，直观判断有其合理性；然而，离开机制谈结论容易失真。',
+      isRelation ? `进一步看，“${key}”与“${key2}”并非互相否定，而是互相校正。` : '进一步而言，关键在于前提是否成立，而非态度是否响亮。'
+    ],
+    closings: [
+      '回到题目，结论应当条件化而非绝对化。',
+      '当判断经受反问并能指向实践时，思辨才真正落地。'
+    ]
+  };
+}
+
+function buildTriadGapTips({ topic, draft, topicPhrases, scaffold, precision, missedCount }) {
+  const tips = [];
+  const d1 = scaffold?.dimensions?.find((d) => d.id === 'd1')?.score ?? 100;
+  const d6 = scaffold?.dimensions?.find((d) => d.id === 'd6')?.score ?? 100;
+  const d3 = scaffold?.dimensions?.find((d) => d.id === 'd3')?.score ?? 100;
+  const coreScore = precision?.coreConsistency?.score ?? 100;
+  const turnSignals = countMatches(draft, /(诚然|然而|另一方面|同时|反过来|不过)/gi);
+  const logicSignals = countMatches(draft, /(因为|所以|因此|由此|从而|意味着)/gi);
+  const emptySignals = countMatches(draft, /(我们要|应该要|必须要|毋庸置疑|显而易见)/gi);
+
+  if (missedCount > 0 || d1 < 65 || coreScore < 60) {
+    tips.push('审题立意缺口：题眼覆盖不足或概念漂移，建议每段首句回扣题眼并补边界。');
+  }
+  if (d6 < 60 || logicSignals < 3 || turnSignals < 1) {
+    tips.push('逻辑层次缺口：结构标志词与机制链不足，建议补“前提-机制-结果”并加转折。');
+  }
+  if (d3 < 60 || emptySignals > 6) {
+    tips.push('语言表达缺口：抽象空话偏多，建议用对仗/排比句并补具体场景。');
+  }
+  if (!tips.length) tips.push('三维表现较均衡，继续保持并强化结尾升华质量。');
+  return tips;
+}
+
+function applyTriadEnhancement(draft, analysis) {
+  const paragraphs = splitParagraphs(draft);
+  if (!paragraphs.length) return draft;
+  const key = analysis.topicPhrases?.[0] || '该命题';
+  const addLogic = '这不是简单表态，而是有前提、有机制、有结果的判断。';
+  const addTurn = `诚然，${key}在某些情境下具有合理性；然而，离开边界谈结论会失真。`;
+  const addLanguage = '守住理性的底色，才能让判断既有锋芒也有分寸。';
+
+  if (paragraphs[1] && !/(前提|机制|结果)/.test(paragraphs[1])) {
+    paragraphs[1] = `${paragraphs[1]}${addLogic}`;
+  }
+  if (paragraphs[2] && !/(诚然|然而)/.test(paragraphs[2])) {
+    paragraphs[2] = `${paragraphs[2]}${addTurn}`;
+  }
+  const lastIdx = paragraphs.length - 1;
+  if (paragraphs[lastIdx] && !/(锋芒|分寸|底色|航向|基石)/.test(paragraphs[lastIdx])) {
+    paragraphs[lastIdx] = `${paragraphs[lastIdx]}${addLanguage}`;
+  }
+  return paragraphs.join('\n\n');
+}
+
+function buildEssayTemplateByType(topic, key, key2, topicType, casePool) {
+  const material = pickCaseMaterial(casePool, topicType);
+  const relationIntro = `面对“${topic}”，最容易出现的写法是迅速表态，但这往往会让论证停在直觉层面。`;
+  const baseDefine = `我更倾向于先界定“${key}”的含义，再讨论它在何种前提下成立、在何种情境下需要修正。`;
+  if (topicType === 'relation') {
+    return [
+      [
+        relationIntro,
+        baseDefine,
+        `题目真正的难点，不在于在“${key}”与“${key2}”之间二选一，而在于如何看见二者的互动关系。`
+      ].join(''),
+      [
+        `先肯定“${key}”的价值与必要性：它提供行动方向与现实动力。`,
+        `例如，${material.example}。`,
+        `但如果只强调这一端，另一端的约束就会被遮蔽，判断会变得失衡。`,
+        `因此需要引入“${key2}”作为校正力量，解释二者如何互相制约与转化。`
+      ].join(''),
+      [
+        `进一步而言，“${key}—${key2}”不是对立的终点，而是动态的张力结构。`,
+        `在不同情境下，两端的权重会发生变化，这正是现实复杂性的来源。`,
+        `所以高质量论证必须给出“何时偏向哪一端”的条件说明。`
+      ].join(''),
+      [
+        `把视角拉回到当下社会：在快速变化的时代，人们更需要在张力中保持判断能力。`,
+        `从${material.domain}场景看，${material.link}.`,
+        `这也意味着写作不能只给态度，而要给标准、给边界、给机制。`
+      ].join(''),
+      [
+        `回到题目，我的结论是：处理“${key}—${key2}”不能二选一，应在条件与边界中作动态判断。`,
+        `当判断能够回应现实并可被检验时，思辨才真正落到行动。`
+      ].join('')
+    ];
+  }
+
+  if (topicType === 'value') {
+    return [
+      [
+        `面对“${topic}”，最重要的是先澄清价值标准，而非急于立场表态。`,
+        baseDefine,
+        `只有把价值放进现实后果里衡量，判断才不会流于情绪化。`
+      ].join(''),
+      [
+        `先看到“${key}”之所以被认可，是因为它在协作中降低成本、提升效率。`,
+        `例如，${material.example}。`,
+        `然而，认可度并不等同于价值本体，流行并不自动等于正确。`,
+        `因此需要把“价值标准”与“社会认可”区分开来。`
+      ].join(''),
+      [
+        `进一步看，价值判断还必须考虑长期后果与公共影响。`,
+        `若只看短期可见性，很多真正重要的价值会被忽视。`,
+        `这就要求我们给出“何时有效、何时失效”的边界判断。`
+      ].join(''),
+      [
+        `回到现实生活，人们在信息过载中更需要价值排序能力。`,
+        `尤其在${material.domain}领域，${material.link}.`,
+        `一篇好的作文，应当在标准、后果与边界中完成论证闭环。`
+      ].join(''),
+      [
+        `因此，我的结论是：${key}是否成立取决于价值标准、现实代价与长期后果。`,
+        `当判断能够经受反问并指向实践时，才具有真正的解释力。`
+      ].join('')
+    ];
+  }
+
+  return [
+    [
+      `面对“${topic}”，若只追求迅速表态，论证往往停在直觉层面。`,
+      baseDefine,
+      `只有把概念放进现实过程里考察，我们才可能得到可检验的判断。`
+    ].join(''),
+    [
+      `先看现实中的第一层图景：许多判断看起来“顺理成章”，其实只是经验惯性的结果。`,
+      `例如，${material.example}。`,
+      `当我们把案例放进“前提—机制—结果”链条，就会发现，同一结论在不同条件下会出现差异。`,
+      `因此，论证不能只靠例子堆叠，而要解释“为什么这个例子支持你的判断”。`
+    ].join(''),
+    [
+      `诚然，强调${key}有其道理：它回应了现实中的某种真实需求，也能提供行动方向。`,
+      `然而，如果只强调这一端，忽视边界与副作用，结论就会迅速滑向片面。`,
+      `真正高质量的判断必须能处理反方质疑：在例外情形下，你的观点是否仍能自洽？`
+    ].join(''),
+    [
+      `把视角拉回到当下社会，在信息高速流动的环境中，人们常被“更快表达”推动，却忽略“更慢思考”。`,
+      `因此高质量作文不只是“我认为”，更要写清“我为什么这样认为、在什么条件下这样认为”。`
+    ].join(''),
+    [
+      `回到题目，我的结论是：${key}并非绝对成立，但在明确前提、补足机制、接受边界的情况下，具有解释力。`,
+      `当判断能够经受反问、能够回应现实、能够指向实践时，思辨才真正从纸面落到生活。`
+    ].join('')
+  ];
+}
+
+function getSelectedCasePool(selectEl) {
+  const val = (selectEl?.value || 'auto').trim();
+  const allow = ['auto', 'tech', 'edu', 'culture', 'society'];
+  return allow.includes(val) ? val : 'auto';
+}
+
+function pickCaseMaterial(casePool, topicType) {
+  const poolMap = {
+    tech: {
+      domain: '科技创新',
+      example: '国产大模型从参数竞赛转向场景落地，证明“可用性”与“真实性”必须同时校验',
+      link: '技术迭代的快并不必然等于价值沉淀的深'
+    },
+    edu: {
+      domain: '教育成长',
+      example: '不少学校从“刷题强度”转向“问题链学习”，成绩提升来自结构化思考而非机械重复',
+      link: '短期分数与长期能力之间需要被重新平衡'
+    },
+    culture: {
+      domain: '文化传播',
+      example: '传统戏曲短视频出圈后，真正沉淀下来的观众往往来自后续的深度导赏与完整观看',
+      link: '传播广度只有与内容厚度联动，才可能走向“可传”'
+    },
+    society: {
+      domain: '社会治理',
+      example: '社区协商中，方案能否落地取决于是否把多方诉求转为可执行规则',
+      link: '公共判断必须兼顾效率、公平与可持续性'
+    }
+  };
+  if (casePool && casePool !== 'auto' && poolMap[casePool]) return poolMap[casePool];
+  const autoByType = topicType === 'value'
+    ? poolMap.society
+    : (topicType === 'relation' ? poolMap.culture : poolMap.edu);
+  return autoByType;
+}
+
+function insertTemplateSentenceAtParagraph(draft, sentence, paragraphNo) {
+  const text = ensureSentenceEnding(sentence);
+  const target = clamp((paragraphNo || 1) - 1, 0, 2);
+  const paragraphs = splitParagraphs(draft || '');
+  while (paragraphs.length < 3) paragraphs.push('');
+  paragraphs[target] = `${text}${paragraphs[target] || ''}`;
+  return paragraphs.map((p) => p.trim()).filter(Boolean).join('\n\n');
+}
+
+function applyTriadGapFix(topic, draft, report) {
+  const paragraphs = splitParagraphs(draft);
+  const analysis = analyzeEssayTopic(topic);
+  const key = analysis.topicPhrases?.[0] || '该命题';
+  while (paragraphs.length < 3) paragraphs.push('');
+  const added = [];
+
+  const need = report.triadGaps || [];
+  const hasGap = (kw) => need.some((x) => x.includes(kw));
+
+  if (hasGap('审题立意')) {
+    const lead = `回到题目，本文讨论的核心是“${key}”，其成立需要前提与边界。`;
+    paragraphs[0] = `${lead}${paragraphs[0]}`;
+    added.push(lead);
+  }
+  if (hasGap('逻辑层次')) {
+    const logic = '其机制链条是：前提成立→产生作用→带来结果，因此结论可被检验。';
+    paragraphs[1] = `${paragraphs[1]}${logic}`;
+    added.push(logic);
+  }
+  if (hasGap('语言表达')) {
+    const style = '守住理性的底色，才能让判断既有锋芒也有分寸。';
+    const lastIdx = paragraphs.length - 1;
+    paragraphs[lastIdx] = `${paragraphs[lastIdx]}${style}`;
+    added.push(style);
+  }
+  const newDraft = paragraphs.map((p) => p.trim()).filter(Boolean).join('\n\n');
+  if (!added.length) {
+    return { newDraft, highlightStart: null, highlightEnd: null, addedSentences: [] };
+  }
+  const first = ensureSentenceEnding(added[0]).trim();
+  const start = newDraft.indexOf(first);
+  return {
+    newDraft,
+    highlightStart: start >= 0 ? start : null,
+    highlightEnd: start >= 0 ? start + first.length : null,
+    addedSentences: added.map((x) => ensureSentenceEnding(x))
+  };
+}
+
+function generateFullEssayDraft(topic, analysis, minWords = 800, maxWords = 850, opts = {}) {
+  const key = analysis.topicPhrases?.[0] || '该命题';
+  const key2 = analysis.topicPhrases?.[1] || '另一端';
+  const topicType = analysis.topicType?.code || 'phenomenon';
+  const template = buildEssayTemplateByType(topic, key, key2, topicType, opts.casePool || 'auto');
+  let essay = template.join('\n\n');
+  essay = applyTriadEnhancement(essay, analysis);
+  essay = normalizeEssayLength(essay, minWords, maxWords, topic, key, key2, topicType);
+  return essay;
+}
+
+function normalizeEssayLength(text, minWords, maxWords, topic, key, key2, topicType) {
+  let draft = String(text || '');
+  const expansionPool = [
+    `进一步而言，题目中的关键词并不是静态标签，而是随情境变化而调整含义的“关系节点”。`,
+    `这就要求写作者在论证时保持两个动作：一是不断回扣题眼，二是不断检验论证边界。`,
+    topicType === 'relation'
+      ? `若忽视“${key}”与“${key2}”的双向作用，结论就会失去弹性，难以解释现实中的复杂样态。`
+      : `若忽视前提差异，同一个判断在不同场景下可能产生完全相反的后果。`,
+    `从备考角度看，这类题目筛选的不是“记忆句子”的能力，而是“组织思维”的能力。`,
+    `因此，考场写作的关键不是追求词句华丽，而是让观点、例证、机制、结论形成闭环。`
+  ];
+
+  while (countWords(draft) < minWords) {
+    const next = expansionPool[Math.floor(Math.random() * expansionPool.length)];
+    draft = `${draft}\n\n${next}`;
+    if (countWords(draft) > maxWords + 30) break;
+  }
+
+  if (countWords(draft) > maxWords) {
+    const paragraphs = splitParagraphs(draft);
+    let out = [];
+    for (let i = 0; i < paragraphs.length; i += 1) {
+      const candidate = out.length ? `${out.join('\n\n')}\n\n${paragraphs[i]}` : paragraphs[i];
+      if (countWords(candidate) <= maxWords) {
+        out.push(paragraphs[i]);
+      } else {
+        const sents = splitSentences(paragraphs[i]);
+        let partial = '';
+        for (let j = 0; j < sents.length; j += 1) {
+          const c = partial ? `${partial}。${sents[j]}` : sents[j];
+          const cAll = out.length ? `${out.join('\n\n')}\n\n${c}` : c;
+          if (countWords(cAll) > maxWords) break;
+          partial = c;
+        }
+        if (partial) out.push(ensureSentenceEnding(partial));
+        break;
+      }
+    }
+    draft = out.join('\n\n');
+  }
+
+  const tailPool = [
+    '总之，面对复杂问题，最可靠的写作姿态不是急于下结论，而是让判断在论证中不断被校准。',
+    '只有把观点放进现实情境反复检验，写作才会从“会说”走向“会思考”。',
+    '这也正是高质量议论文的价值：它不仅给出态度，更给出可被验证的理由。'
+  ];
+  let guard = 0;
+  while (countWords(draft) < minWords && guard < 8) {
+    draft = `${draft}\n\n${tailPool[guard % tailPool.length]}`;
+    guard += 1;
+  }
+  if (countWords(draft) > maxWords) {
+    draft = trimDraftToWordLimit(draft, maxWords);
+  }
+  return draft;
+}
+
+function renderGeneratedEssayReport(payload, container) {
+  const { topic, draft, wordCount, score, offTopic } = payload;
+  const paraCount = splitParagraphs(draft).length;
+  container.innerHTML = `
+    <div class="agent-result-head">
+      <h3>完整范文已生成（800-850字）</h3>
+      <div class="agent-tags">
+        <span class="agent-tag">字数：${wordCount}</span>
+        <span class="agent-tag">段落：${paraCount}</span>
+        <span class="agent-tag">评分：${score.total}/100（${score.score70}/70）</span>
+        <span class="agent-tag">${escapeHtml(score.level)}</span>
+        <span class="agent-tag risk ${normalizeRiskClass(offTopic.riskLevel)}">偏题风险：${escapeHtml(offTopic.riskLevel)}</span>
+      </div>
+    </div>
+    <div class="agent-result-block">
+      <h4>已自动接入流程</h4>
+      <ul>
+        <li>完整范文已写入草稿框，可直接继续修改。</li>
+        <li>已自动完成防跑题检查与评分。</li>
+        <li>如需进一步提分，可点击“按提分动作一键改写”。</li>
+      </ul>
+      <p>题目：${escapeHtml(topic)}</p>
+    </div>
+  `;
+}
+
+function injectTemplateIntoDraft(draft, sentence, kind) {
+  const text = ensureSentenceEnding(sentence);
+  const paragraphs = splitParagraphs(draft);
+  if (!paragraphs.length) {
+    if (kind === 'rising') return `第一段：${text}\n\n第二段：\n\n第三段：`;
+    return text;
+  }
+  if (kind === 'opening') {
+    paragraphs[0] = `${text}${paragraphs[0]}`;
+  } else if (kind === 'turning') {
+    const idx = paragraphs.length >= 2 ? 1 : 0;
+    paragraphs[idx] = `${text}${paragraphs[idx]}`;
+  } else {
+    const idx = paragraphs.length - 1;
+    paragraphs[idx] = `${paragraphs[idx]}${text}`;
+  }
+  return paragraphs.join('\n\n');
 }
 
 function runOffTopicCheck(topic, draft) {
@@ -441,16 +1679,20 @@ function runOffTopicCheck(topic, draft) {
 
   const weak = diagnostics.filter((x) => x.level === '偏题风险').length;
   const scaffold = buildOffTopicScaffold({ topic, draft, topicType, topicPhrases, paragraphs });
+  const precision = buildPrecisionChecks({ topic, draft, topicType, topicPhrases, paragraphs, diagnostics });
   const baseRiskPoints = (missed.length * 8) + (weak * 10) + (paragraphs.length < 3 ? 10 : 0);
   const qualityScore = Math.round(
     (scaffold.dimensions.reduce((sum, d) => sum + d.score, 0) / Math.max(scaffold.dimensions.length, 1)) * 0.72
       + (100 - baseRiskPoints) * 0.28
   );
-  const riskScore = clamp(qualityScore, 0, 100);
+  const precisionPenalty = Math.round((100 - precision.avgScore) * 0.18);
+  const riskScore = clamp(qualityScore - precisionPenalty, 0, 100);
   const riskLevel = riskScore < 50 ? '高风险' : (riskScore < 75 ? '中风险' : '低风险');
-  const flawScan = scanArgumentFlaws({ topic, topicType, draft, topicPhrases, paragraphDiagnostics: diagnostics, paragraphs, scaffold });
+  const flawScan = scanArgumentFlaws({ topic, topicType, draft, topicPhrases, paragraphDiagnostics: diagnostics, paragraphs, scaffold, precision });
+  const paragraphAdvice = buildParagraphAdvice({ topic, topicType, draft, topicPhrases, paragraphs, diagnostics, scaffold, precision });
   const lowDims = scaffold.dimensions.filter((d) => d.score < 65);
   const autoSuggestions = lowDims.slice(0, 4).map((d) => d.fix);
+  const triadGaps = buildTriadGapTips({ topic, draft, topicPhrases, scaffold, precision, missedCount: missed.length });
 
   return {
     topic,
@@ -463,13 +1705,17 @@ function runOffTopicCheck(topic, draft) {
     paragraphDiagnostics: diagnostics,
     riskLevel,
     riskScore,
+    precision,
     scaffold,
     flawScan,
+    paragraphAdvice,
+    triadGaps,
     evidence: [
       `题眼覆盖：${matched.length}/${Math.max(topicPhrases.length, 1)}`,
       `段落数量：${paragraphs.length}`,
       `偏题段落：${weak}段`,
-      `思辨脚手架：${scaffold.summary}`
+      `思辨脚手架：${scaffold.summary}`,
+      `精准度核验：核心一致性${precision.coreConsistency.score} / 对立覆盖${precision.oppositionCoverage.score} / 升华质量${precision.risingQuality.score}`
     ],
     suggestions: [
       missed.length ? `补齐缺失题眼：${missed.slice(0, 3).join('、')}` : '题眼覆盖基本达标。',
@@ -530,8 +1776,104 @@ function buildOffTopicScaffold({ topic, draft, topicType, topicPhrases, paragrap
   return { coreTerms, coveredTerms, dimensions, summary };
 }
 
+function buildPrecisionChecks({ topic, draft, topicType, topicPhrases, paragraphs, diagnostics }) {
+  const core = (topicPhrases || []).slice(0, 3);
+  const paraCoreHits = (paragraphs || []).map((p) => core.filter((k) => p.includes(k)).length);
+  const coreCoverage = paraCoreHits.filter((n) => n > 0).length / Math.max((paragraphs || []).length, 1);
+  const weakParas = (diagnostics || []).filter((d) => d.semanticScore < 45).length;
+  const coreScore = clamp(Math.round(coreCoverage * 75 + Math.max(0, 25 - weakParas * 8)), 0, 100);
+
+  const text = String(draft || '');
+  const oppositeSignals = countMatches(text, /(另一方面|然而|诚然|但是|反过来|并非|未必|同时)/gi);
+  const dualTerms = topicType.code === 'relation'
+    ? countMatches(topic, /与|和|还是|对立|之间/gi)
+    : 1;
+  const oppositionScore = clamp(Math.round(Math.min(100, oppositeSignals * 12 + dualTerms * 18)), 0, 100);
+
+  const lastParagraph = (paragraphs || []).length ? paragraphs[(paragraphs || []).length - 1] : '';
+  const risingSignals = countMatches(lastParagraph, /(回到题目|因此|总之|由此|意义|价值|时代|实践|公共)/gi);
+  const boundarySignals = countMatches(lastParagraph, /(条件|前提|边界|未必|并不总是)/gi);
+  const risingScore = clamp(Math.round(Math.min(100, risingSignals * 12 + boundarySignals * 16 + 20)), 0, 100);
+
+  const avgScore = Math.round((coreScore + oppositionScore + risingScore) / 3);
+  return {
+    avgScore,
+    coreConsistency: {
+      score: coreScore,
+      detail: `核心概念在段落中的连续覆盖率：${Math.round(coreCoverage * 100)}%`
+    },
+    oppositionCoverage: {
+      score: oppositionScore,
+      detail: `对立面与转折信号词出现：${oppositeSignals}次`
+    },
+    risingQuality: {
+      score: risingScore,
+      detail: `结尾升华信号：${risingSignals}次，边界词：${boundarySignals}次`
+    }
+  };
+}
+
+function buildParagraphAdvice({ topic, topicType, draft, topicPhrases, paragraphs, diagnostics }) {
+  const key = topicPhrases[0] || '核心概念';
+  return (paragraphs || []).map((paragraph, index) => {
+    const text = String(paragraph || '');
+    const hits = (topicPhrases || []).filter((k) => text.includes(k));
+    const hasMechanism = /(因为|所以|因此|由此|机制|本质|说明|意味着)/.test(text);
+    const hasTransition = /(诚然|然而|另一方面|同时|反过来|不过|进一步)/.test(text);
+    const hasReality = /(现实|社会|时代|校园|平台|技术|教育|生活|AI|人工智能)/.test(text);
+    const hasBoundary = /(前提|条件|边界|如果|当.*时|未必|并不总是)/.test(text);
+    const hasDefinition = /(所谓|不是.*而是|并非.*而是|内涵|指的是)/.test(text);
+    const issues = [];
+
+    if (!hits.length) issues.push('题眼回扣不足');
+    if (index === 0 && !hasDefinition) issues.push('开篇未界定概念');
+    if (index > 0 && !hasMechanism) issues.push('缺少机制解释');
+    if (topicType.code === 'relation' && index > 0 && !hasTransition) issues.push('缺少辩证转折');
+    if (index === (paragraphs.length - 1) && !hasBoundary) issues.push('收束缺少边界');
+    if (index > 0 && !hasReality) issues.push('现实关联偏弱');
+
+    const focus = issues[0] || '本段基础较稳，可继续精炼表达。';
+    const score = diagnostics?.[index]?.semanticScore ?? 70;
+    const rewrite = buildParagraphRewriteParagraph({ topic, key, topicType, paragraph: text, index, total: paragraphs.length, hits, hasMechanism, hasTransition, hasReality, hasBoundary, hasDefinition });
+    return {
+      index,
+      score,
+      focus,
+      issues,
+      suggestion: issues.length ? `优先处理：${issues.join('、')}` : '可保持结构不变，只精炼语言。',
+      rewrite
+    };
+  });
+}
+
+function buildParagraphRewriteParagraph(payload) {
+  const { key, topicType, paragraph, index, total, hits, hasMechanism, hasTransition, hasReality, hasBoundary, hasDefinition } = payload;
+  let next = String(paragraph || '').trim();
+  if (!next) next = `本段仍需围绕“${key}”展开具体论证。`;
+
+  if (!hits.length) {
+    next = `回到题目，本文讨论的核心仍是“${key}”。${next}`;
+  }
+  if (index === 0 && !hasDefinition) {
+    next = `所谓“${key}”，并不是表面化的直觉判断，而是在具体条件下成立的概念。${next}`;
+  }
+  if (index > 0 && !hasMechanism) {
+    next = `${next} 其关键机制在于：前提一旦成立，判断便会通过具体作用链条转化为现实结果。`;
+  }
+  if (topicType.code === 'relation' && index > 0 && !hasTransition) {
+    next = `诚然，只写单一一端会让论证更直接；然而，忽视另一端会让结论失衡。${next}`;
+  }
+  if (index > 0 && !hasReality) {
+    next = `${next} 放到当下的校园、平台和社会情境中看，这一问题并不抽象，而是持续影响具体选择。`;
+  }
+  if (index === total - 1 && !hasBoundary) {
+    next = `${next} 当然，这一判断并非绝对成立，它仍受前提、边界与现实条件制约。`;
+  }
+  return next.trim();
+}
+
 function scanArgumentFlaws(payload) {
-  const { topic, topicType, draft, topicPhrases, paragraphDiagnostics, scaffold } = payload;
+  const { topic, topicType, draft, topicPhrases, paragraphDiagnostics, scaffold, precision } = payload;
   const flaws = [];
   const abs = countMatches(draft, /(绝对|唯一|必须|必然)/gi);
   const cond = countMatches(draft, /(在.*条件下|前提是|如果|当)/gi);
@@ -546,6 +1888,9 @@ function scanArgumentFlaws(payload) {
   if (scaffold?.dimensions?.some((d) => d.id === 'd4' && d.score < 55)) flaws.push({ name: '现实锚点不足', level: '中', evidence: '抽象判断较多，现实场景支撑偏弱', fix: '补一个时代语境例证并解释其指向。', paragraphIndex: 1 });
   if (scaffold?.dimensions?.some((d) => d.id === 'd3' && d.score < 55)) flaws.push({ name: '停留表象', level: '高', evidence: '现象描述多于机制解释', fix: '补“究其本质/其机制在于”句。', paragraphIndex: 1 });
   if (scaffold?.dimensions?.some((d) => d.id === 'd6' && d.score < 50)) flaws.push({ name: '结构节奏平面化', level: '中', evidence: '转折与递进标志词不足', fix: '补“诚然-然而-进一步而言”结构锚点。', paragraphIndex: 0 });
+  if ((precision?.coreConsistency?.score || 100) < 60) flaws.push({ name: '核心概念一致性偏弱', level: '高', evidence: precision.coreConsistency.detail, fix: '每段首句回扣核心概念并保持同义链一致。', paragraphIndex: 0 });
+  if ((precision?.oppositionCoverage?.score || 100) < 60) flaws.push({ name: '对立面覆盖不足', level: '中', evidence: precision.oppositionCoverage.detail, fix: '补一段“诚然-然而”双边论证。', paragraphIndex: 1 });
+  if ((precision?.risingQuality?.score || 100) < 60) flaws.push({ name: '升华质量不足', level: '中', evidence: precision.risingQuality.detail, fix: '结尾增加“价值意义+边界条件”双句收束。', paragraphIndex: Math.max(0, (paragraphDiagnostics?.length || 1) - 1) });
 
   return flaws.slice(0, 5).map((f, i) => ({ ...f, id: `flaw-${i + 1}`, rewriteLead: buildFlawLeadRewrite(f, topic, topicPhrases) }));
 }
@@ -561,6 +1906,23 @@ function buildFlawLeadRewrite(flaw, topic, topicPhrases) {
 function renderOffTopicReport(report, container) {
   const evidenceItems = report.evidence.map((x) => `<li>${escapeHtml(x)}</li>`).join('');
   const suggestionItems = report.suggestions.map((x) => `<li>${escapeHtml(x)}</li>`).join('');
+  const precisionRows = report.precision ? `
+    <div class="score-row">
+      <div class="score-row-top"><span>核心概念一致性</span><strong>${report.precision.coreConsistency.score}/100</strong></div>
+      <div class="score-bar"><span style="width:${report.precision.coreConsistency.score}%"></span></div>
+      <p class="agent-para-issues">${escapeHtml(report.precision.coreConsistency.detail)}</p>
+    </div>
+    <div class="score-row">
+      <div class="score-row-top"><span>对立面覆盖</span><strong>${report.precision.oppositionCoverage.score}/100</strong></div>
+      <div class="score-bar"><span style="width:${report.precision.oppositionCoverage.score}%"></span></div>
+      <p class="agent-para-issues">${escapeHtml(report.precision.oppositionCoverage.detail)}</p>
+    </div>
+    <div class="score-row">
+      <div class="score-row-top"><span>升华质量</span><strong>${report.precision.risingQuality.score}/100</strong></div>
+      <div class="score-bar"><span style="width:${report.precision.risingQuality.score}%"></span></div>
+      <p class="agent-para-issues">${escapeHtml(report.precision.risingQuality.detail)}</p>
+    </div>
+  ` : '';
   const dimensionCards = (report.scaffold?.dimensions || []).map((d) => `
     <div class="score-row">
       <div class="score-row-top"><span>${escapeHtml(d.name)}</span><strong>${d.score}/100</strong></div>
@@ -575,14 +1937,43 @@ function renderOffTopicReport(report, container) {
       <div class="score-bar"><span style="width:${item.semanticScore}%"></span></div>
       <p class="agent-para-issues">命中题眼：${escapeHtml((item.matchedTopicPhrases || []).join('、') || '无')}</p>
     </div>`).join('');
+  const paragraphAdviceRows = renderParagraphAdviceRows(report.paragraphAdvice || [], 'offtopic');
+  const sentenceQuality = analyzeSentenceQuality(report.topic, report.draft, report.topicPhrases);
+  const goodSentences = sentenceQuality.good.map((x) => `<li class="sentence-good">${escapeHtml(x)}</li>`).join('');
+  const badSentences = sentenceQuality.bad.map((x) => `<li class="sentence-bad">${escapeHtml(x)}</li>`).join('');
+  const triadGapRows = (report.triadGaps || []).map((x) => `<li>${escapeHtml(x)}</li>`).join('');
 
   container.innerHTML = `
     <div class="agent-result-head"><h3>防跑题诊断报告</h3><div class="agent-tags"><span class="agent-tag risk ${normalizeRiskClass(report.riskLevel)}">偏题风险：${report.riskLevel}</span><span class="agent-tag">扣题指数：${report.riskScore}/100</span></div></div>
+    <div class="agent-result-block"><h4>精准度核验（3项）</h4><div class="score-grid">${precisionRows}</div></div>
     <div class="agent-result-block"><h4>思辨脚手架（6维）</h4><div class="score-grid">${dimensionCards}</div></div>
     <div class="agent-result-block"><h4>诊断依据</h4><ul>${evidenceItems}</ul></div>
+    <div class="agent-result-block">
+      <h4>三维训练缺口提示</h4>
+      <ul>${triadGapRows || '<li>当前三维表现较均衡。</li>'}</ul>
+      <div class="agent-actions secondary">
+        <button class="agent-btn primary triad-gap-fix-btn" type="button">一键补缺</button>
+      </div>
+    </div>
     <div class="agent-result-block"><h4>修正建议</h4><ul>${suggestionItems}</ul></div>
     <div class="agent-result-block"><h4>段落贴合图</h4><div class="score-grid">${paragraphCards || '<p>暂无段落</p>'}</div></div>
+    <div class="agent-result-block"><h4>段落级诊断与一键改写</h4>${paragraphAdviceRows}</div>
+    <div class="agent-result-block"><h4>句子质量提示</h4><p>高分句候选</p><ul>${goodSentences || '<li>暂无</li>'}</ul><p>低分句预警</p><ul>${badSentences || '<li>暂无</li>'}</ul></div>
     <div class="agent-result-block"><h4>论证漏洞扫描</h4>${renderFlawScanRows(report.flawScan || [])}</div>`;
+}
+
+function renderParagraphAdviceRows(adviceList, reportType = 'offtopic') {
+  if (!adviceList.length) return '<p>暂无段落级诊断。</p>';
+  return adviceList.map((item) => `
+    <div class="flaw-row">
+      <div class="flaw-row-top"><span>第${item.index + 1}段重点问题</span><strong>${item.score}/100</strong></div>
+      <p>诊断：${escapeHtml(item.focus)}</p>
+      <p>建议：${escapeHtml(item.suggestion)}</p>
+      <div class="flaw-actions">
+        <span class="flaw-target">${escapeHtml((item.issues || []).join(' / ') || '本段基础较稳')}</span>
+        <button class="agent-btn ghost paragraph-rewrite-btn" type="button" data-report-type="${escapeHtml(reportType)}" data-paragraph-index="${item.index}">一键改写本段</button>
+      </div>
+    </div>`).join('');
 }
 
 function renderFlawScanRows(flawScan) {
@@ -613,16 +2004,41 @@ function replaceParagraphLeadSentence(draft, paragraphIndex, newLeadSentence) {
   return { ok: true, newDraft: `${draft.slice(0, target.start)}${newParagraph}${draft.slice(target.end)}` };
 }
 
+function rewriteParagraphByAdvice(topic, draft, advice) {
+  const ranges = getParagraphRanges(draft);
+  if (!ranges.length) return { ok: false };
+  const idx = clamp(advice?.index || 0, 0, ranges.length - 1);
+  const target = ranges[idx];
+  const replacement = ensureSentenceEnding(advice?.rewrite || target.text);
+  const newDraft = `${draft.slice(0, target.start)}${replacement}${draft.slice(target.end)}`;
+  return {
+    ok: true,
+    newDraft,
+    highlightStart: target.start,
+    highlightEnd: target.start + replacement.length
+  };
+}
+
 function scoreEssayDraft(topic, draft) {
   const offTopic = runOffTopicCheck(topic, draft);
   const paragraphs = splitParagraphs(draft);
   const sentenceCount = splitSentences(draft).length;
   const wordCount = countWords(draft);
-  const relevance = clamp(Math.round(offTopic.riskScore * 0.2), 0, 20);
-  const structure = clamp((paragraphs.length >= 3 ? 12 : 6) + (sentenceCount >= 8 ? 8 : 4), 0, 20);
-  const argument = clamp((countMatches(draft, /(因为|所以|因此)/gi) >= 3 ? 12 : 7) + (countMatches(draft, /(例如|比如|案例)/gi) >= 1 ? 8 : 4), 0, 20);
-  const language = clamp(wordCount >= 600 ? 16 : wordCount >= 380 ? 13 : 9, 0, 20);
-  const depth = clamp(countMatches(draft, /(然而|另一方面|同时|边界|条件)/gi) >= 2 ? 16 : 10, 0, 20);
+  const dims = offTopic.scaffold?.dimensions || [];
+  const d1 = dims.find((d) => d.id === 'd1')?.score || 0;
+  const d2 = dims.find((d) => d.id === 'd2')?.score || 0;
+  const d3 = dims.find((d) => d.id === 'd3')?.score || 0;
+  const d5 = dims.find((d) => d.id === 'd5')?.score || 0;
+  const d6 = dims.find((d) => d.id === 'd6')?.score || 0;
+  const logicCount = countMatches(draft, /(因为|所以|因此|由此|意味着|从而)/gi);
+  const evidenceCount = countMatches(draft, /(例如|比如|案例|以.*为例|数据)/gi);
+  const turnCount = countMatches(draft, /(诚然|然而|另一方面|同时|反过来|不过)/gi);
+
+  const relevance = clamp(Math.round((d1 * 0.45 + d2 * 0.25 + d5 * 0.3) / 5), 0, 20);
+  const structure = clamp(Math.round(((paragraphs.length >= 3 ? 70 : 45) + Math.min(20, sentenceCount * 1.8) + Math.min(10, d6 * 0.1)) / 5), 0, 20);
+  const argument = clamp(Math.round((Math.min(45, logicCount * 8) + Math.min(30, evidenceCount * 10) + Math.min(25, turnCount * 8)) / 5), 0, 20);
+  const language = clamp(wordCount >= 850 ? 15 : wordCount >= 760 ? 18 : wordCount >= 620 ? 16 : wordCount >= 450 ? 13 : 10, 0, 20);
+  const depth = clamp(Math.round((d2 * 0.3 + d3 * 0.45 + d5 * 0.25) / 5), 0, 20);
   const total = relevance + structure + argument + language + depth;
   const score70 = Math.round(total * 0.7);
   const level = getShanghaiBand(total);
@@ -642,9 +2058,9 @@ function scoreEssayDraft(topic, draft) {
     stats: { wordCount, sentenceCount, paragraphCount: paragraphs.length },
     offTopic,
     actions: [
-      relevance < 15 ? '每段首句回扣题眼词。' : '审题扣题较稳。',
-      argument < 15 ? '补1个例证并写清机制解释。' : '论证基础可用。',
-      depth < 15 ? '补“另一方面/然而”做反向校正。' : '思辨层次基本达标。'
+      relevance < 15 ? '审题立意偏弱：先界定概念，再明确成立条件。' : '审题扣题较稳。',
+      argument < 15 ? '论证链不足：每个例子后补“机制解释句”。' : '论证基础可用。',
+      depth < 15 ? '思辨深度待提升：补“诚然-然而-因此”并写边界。' : '思辨层次基本达标。'
     ]
   };
 }
@@ -656,11 +2072,408 @@ function renderScoreReport(report, container) {
       <div class="score-bar"><span style="width:${Math.round((x.score / x.max) * 100)}%"></span></div>
     </div>`).join('');
   const actions = report.actions.map((x) => `<li>${escapeHtml(x)}</li>`).join('');
+  const boostActions = buildScoreBoostActions(report).map((x) => `<li>${escapeHtml(x)}</li>`).join('');
+  const weakPlan = buildWeakTrainingPlan(report);
+  const weakRows = (weakPlan.weak || []).map((w, i) => `<li><strong>${i + 1}. ${escapeHtml(w.label)}</strong>：${escapeHtml(w.drill)} <button class="agent-btn ghost weak-training-btn" type="button" data-training-prompt="${escapeHtml(w.prompt)}">推送练习</button></li>`).join('');
+  const errorBook = buildErrorBookSummary(report);
+  const currentErrorTags = (errorBook.currentTags || []).map((tag) => `<span class="agent-tag risk high">${escapeHtml(tag)}</span>`).join('');
+  const topErrorRows = (errorBook.drills || []).map((item, i) => `<li><strong>${i + 1}. ${escapeHtml(item.tag)}</strong>（${item.count}次）：${escapeHtml(item.drill)} <button class="agent-btn ghost error-drill-btn" type="button" data-training-prompt="${escapeHtml(item.prompt)}">推送专项</button></li>`).join('');
+  const recentErrorRows = (errorBook.recent || []).map((item) => `<li>${escapeHtml(item.topic)} ｜ ${escapeHtml((item.tags || []).join('、'))}</li>`).join('');
+  const paragraphAdviceRows = renderParagraphAdviceRows(report.offTopic?.paragraphAdvice || [], 'score');
   container.innerHTML = `
     <div class="agent-result-head"><h3>上海作文维度评分报告</h3><div class="agent-tags"><span class="agent-tag">总分：${report.total}/100</span><span class="agent-tag">折算：${report.score70}/70</span><span class="agent-tag">分档：${escapeHtml(report.level)}</span><span class="agent-tag risk ${normalizeRiskClass(report.offTopic.riskLevel)}">偏题风险：${escapeHtml(report.offTopic.riskLevel)}</span></div></div>
     <div class="agent-result-block"><h4>分维度得分</h4><div class="score-grid">${rows}</div></div>
     <div class="agent-result-block"><h4>文本统计</h4><p>字数：${report.stats.wordCount} ｜ 句子：${report.stats.sentenceCount} ｜ 段落：${report.stats.paragraphCount}</p></div>
-    <div class="agent-result-block"><h4>提分动作</h4><ul>${actions}</ul></div>`;
+    <div class="agent-result-block"><h4>提分动作</h4><ul>${actions}${boostActions}</ul><div class="agent-actions secondary"><button class="agent-btn primary apply-score-boost-btn" type="button">按提分动作一键改写</button></div></div>
+    <div class="agent-result-block"><h4>错因本（当前草稿）</h4><div class="agent-tags">${currentErrorTags || '<span class="agent-tag">当前未识别明显高频错因</span>'}</div><p>已累计记录：${errorBook.total}次</p></div>
+    <div class="agent-result-block"><h4>高频错因专项训练</h4><ul>${topErrorRows || '<li>暂未形成高频错因画像</li>'}</ul><p>最近记录</p><ul>${recentErrorRows || '<li>暂无错因记录</li>'}</ul></div>
+    <div class="agent-result-block"><h4>段落级诊断与一键改写</h4>${paragraphAdviceRows}</div>
+    <div class="agent-result-block"><h4>薄弱维度专项训练（已累计${weakPlan.count}次评分）</h4><ul>${weakRows || '<li>暂无训练建议</li>'}</ul></div>`;
+}
+
+function buildScoreBoostActions(report) {
+  const picks = [];
+  const sorted = [...(report.dimensions || [])].sort((a, b) => a.score - b.score);
+  sorted.slice(0, 3).forEach((d) => {
+    if (d.label === '审题立意') picks.push('每段首句加入题眼词，并在段末回扣题目问法。');
+    if (d.label === '论证与材料') picks.push('每个案例后补1句“机制解释”，避免只讲故事。');
+    if (d.label === '思辨深度') picks.push('补“诚然-然而-因此”三步转折，加入边界条件。');
+    if (d.label === '结构章法') picks.push('强化三段结构：界定概念→展开论证→条件化结论。');
+    if (d.label === '语言表达') picks.push('删口号句，改成短句+判断句，提升表达清晰度。');
+  });
+  return dedupeArray(picks).slice(0, 3);
+}
+
+function applyScoreBoostRewrite(topic, draft) {
+  const before = scoreEssayDraft(topic, draft);
+  const analysis = analyzeEssayTopic(topic);
+  const topicKey = analysis.topicPhrases[0] || extractTopicPhrases(topic)[0] || '该命题';
+  const paragraphs = splitParagraphs(draft);
+  const fixed = (paragraphs.length ? paragraphs : [draft]).map((p, i, arr) => {
+    const lines = splitSentences(p);
+    let paragraph = p.trim();
+
+    if (!paragraph) return paragraph;
+
+    if (!new RegExp(escapeRegExp(topicKey), 'i').test(paragraph)) {
+      const lead = i === 0
+        ? `回到题目，本文讨论的核心是“${topicKey}”。`
+        : `进一步看，第${i + 1}段仍应围绕“${topicKey}”展开。`;
+      paragraph = `${lead}${paragraph}`;
+    }
+
+    const hasExample = /(例如|比如|案例|数据|以.*为例)/.test(paragraph);
+    const hasReason = /(因为|所以|因此|由此|意味着|机制)/.test(paragraph);
+    if (hasExample && !hasReason) {
+      paragraph = `${paragraph} 因此，这一例子说明其成立并非偶然，而是由具体条件与机制共同造成。`;
+    }
+
+    if (i === 1 && !/(然而|另一方面|诚然|同时|反过来)/.test(paragraph)) {
+      paragraph = `诚然，单一立场看似直接；然而，若忽视边界条件，结论就会变得片面。${paragraph}`;
+    }
+
+    if (i === arr.length - 1 && !/(在.*条件下|前提|边界|未必|并不总是)/.test(paragraph)) {
+      paragraph = `${paragraph} 总之，在不同前提与边界下，这一判断的成立程度并不相同。`;
+    }
+
+    paragraph = paragraph
+      .replaceAll('绝对', '在多数情况下')
+      .replaceAll('唯一', '关键之一')
+      .replaceAll('必然', '较大概率')
+      .replaceAll('必须', '更应');
+
+    if (lines.length < 2 && paragraph.length > 120 && !paragraph.includes('。')) {
+      paragraph = `${paragraph}。`;
+    }
+
+    return paragraph.trim();
+  }).filter(Boolean);
+
+  let newDraft = fixed.join('\n\n');
+  if (countWords(newDraft) > EXAM_MODE_MAX_WORDS + 60) {
+    newDraft = trimDraftToWordLimit(newDraft, EXAM_MODE_MAX_WORDS);
+  }
+
+  const after = scoreEssayDraft(topic, newDraft);
+  return {
+    before,
+    after,
+    newDraft,
+    delta: after.total - before.total,
+    score70Delta: after.score70 - before.score70,
+    actions: buildScoreBoostActions(before)
+  };
+}
+
+function trimDraftToWordLimit(draft, limit) {
+  const paragraphs = splitParagraphs(draft);
+  const out = [];
+  for (let i = 0; i < paragraphs.length; i += 1) {
+    const p = paragraphs[i];
+    if (countWords(`${out.join('\n\n')}\n\n${p}`) <= limit) {
+      out.push(p);
+      continue;
+    }
+    const sentences = splitSentences(p);
+    let keep = '';
+    for (let j = 0; j < sentences.length; j += 1) {
+      const candidate = keep ? `${keep}。${sentences[j]}` : sentences[j];
+      if (countWords(`${out.join('\n\n')}\n\n${candidate}`) > limit) break;
+      keep = candidate;
+    }
+    if (keep) out.push(ensureSentenceEnding(keep));
+    break;
+  }
+  return out.join('\n\n').trim();
+}
+
+function renderScoreBoostReport(boost, container) {
+  const trendClass = boost.delta >= 0 ? 'low' : 'high';
+  const trendText = boost.delta >= 0 ? `+${boost.delta}` : `${boost.delta}`;
+  const trend70Text = boost.score70Delta >= 0 ? `+${boost.score70Delta}` : `${boost.score70Delta}`;
+  const actionItems = (boost.actions || []).map((x) => `<li>${escapeHtml(x)}</li>`).join('');
+  container.innerHTML = `
+    <div class="agent-result-head">
+      <h3>一键提分改写完成</h3>
+      <div class="agent-tags">
+        <span class="agent-tag">改写前：${boost.before.total}/100（${boost.before.score70}/70）</span>
+        <span class="agent-tag">改写后：${boost.after.total}/100（${boost.after.score70}/70）</span>
+        <span class="agent-tag risk ${trendClass}">变化：${trendText}（折算${trend70Text}）</span>
+      </div>
+    </div>
+    <div class="agent-result-block">
+      <h4>本次自动执行的提分动作</h4>
+      <ul>${actionItems}</ul>
+      <p>草稿已自动写回编辑区，你可以继续点“防跑题检查”做二次精修。</p>
+    </div>
+  `;
+}
+
+function runBaselineHealthCheck() {
+  const checks = [];
+  const requiredIds = [
+    'essayTopicInput',
+    'essayDraftInput',
+    'analyzeTopicBtn',
+    'generateFullEssayBtn',
+    'offTopicCheckBtn',
+    'scoreDraftBtn',
+    'improveDraftBtn',
+    'regressionTestBtn',
+    'baselineCheckBtn',
+    'agentResult'
+  ];
+  const missing = requiredIds.filter((id) => !document.getElementById(id));
+  checks.push({
+    name: '页面核心元素',
+    ok: missing.length === 0,
+    detail: missing.length ? `缺失：${missing.join('、')}` : '关键元素齐全'
+  });
+
+  const functionMap = [
+    'analyzeEssayTopic',
+    'runOffTopicCheck',
+    'scoreEssayDraft',
+    'quickGenerateEssay'
+  ];
+  const missingFns = functionMap.filter((fn) => typeof window[fn] !== 'function');
+  checks.push({
+    name: '关键函数可用',
+    ok: missingFns.length === 0,
+    detail: missingFns.length ? `缺失：${missingFns.join('、')}` : '核心函数可调用'
+  });
+
+  const genBtn = document.getElementById('generateFullEssayBtn');
+  const genBound = !!(genBtn && (genBtn.dataset.boundGenerate === '1' || typeof genBtn.onclick === 'function'));
+  checks.push({
+    name: '一键范文按钮绑定',
+    ok: genBound,
+    detail: genBound ? '已绑定（主生成链路）' : '未检测到有效绑定'
+  });
+
+  const localStorageOK = testLocalStorage();
+  checks.push({
+    name: '本地存储读写',
+    ok: localStorageOK.ok,
+    detail: localStorageOK.message
+  });
+
+  const versionCheck = checkScriptVersions();
+  checks.push({
+    name: '脚本版本一致性',
+    ok: versionCheck.ok,
+    detail: versionCheck.message
+  });
+
+  const featureCheck = runFeatureFlowChecks();
+  checks.push(...featureCheck);
+  const regression = runRegressionSuite();
+  checks.push({
+    name: '回归测试样例',
+    ok: regression.passed === regression.total,
+    detail: `通过 ${regression.passed}/${regression.total}`
+  });
+
+  const passed = checks.filter((x) => x.ok).length;
+  return {
+    checks,
+    passed,
+    total: checks.length,
+    level: passed === checks.length ? '通过' : (passed >= checks.length - 1 ? '基本通过' : '未通过'),
+    suggestions: checks.filter((x) => !x.ok).map((x) => buildBaselineFixSuggestion(x.name))
+  };
+}
+
+function renderBaselineCheckReport(report, container) {
+  const rows = report.checks.map((c) => `
+    <div class="score-row">
+      <div class="score-row-top"><span>${escapeHtml(c.name)}</span><strong>${c.ok ? '通过' : '失败'}</strong></div>
+      <p class="agent-para-issues">${escapeHtml(c.detail)}</p>
+    </div>
+  `).join('');
+  const fixes = (report.suggestions || []).length
+    ? `<ul>${report.suggestions.map((x) => `<li>${escapeHtml(x)}</li>`).join('')}</ul>`
+    : '<p>当前无需修复，基础稳定性达标。</p>';
+  container.innerHTML = `
+    <div class="agent-result-head">
+      <h3>基础自检报告（稳定性）</h3>
+      <div class="agent-tags">
+        <span class="agent-tag">结果：${escapeHtml(report.level)}</span>
+        <span class="agent-tag">通过项：${report.passed}/${report.total}</span>
+      </div>
+    </div>
+    <div class="agent-result-block"><h4>检查明细</h4><div class="score-grid">${rows}</div></div>
+    <div class="agent-result-block"><h4>修复建议</h4>${fixes}</div>
+  `;
+}
+
+function testLocalStorage() {
+  try {
+    const key = '__gaokao_health_test__';
+    localStorage.setItem(key, 'ok');
+    const v = localStorage.getItem(key);
+    localStorage.removeItem(key);
+    return { ok: v === 'ok', message: v === 'ok' ? '读写正常' : '读写异常' };
+  } catch (err) {
+    return { ok: false, message: `不可用：${err?.message || '未知错误'}` };
+  }
+}
+
+function checkScriptVersions() {
+  const scripts = [...document.querySelectorAll('script[src]')].map((s) => s.getAttribute('src') || '');
+  const pickV = (name) => {
+    const hit = scripts.find((src) => src.includes(name));
+    if (!hit) return null;
+    const m = hit.match(/[?&]v=(\d+)/);
+    return m ? Number(m[1]) : null;
+  };
+  const dv = pickV('data.js');
+  const av = pickV('app.js');
+  if (dv == null || av == null) {
+    return { ok: false, message: '脚本未带版本号，建议统一追加 ?v=数字' };
+  }
+  const ok = dv === av;
+  return {
+    ok,
+    message: ok ? `版本一致：v=${dv}` : `版本不一致：data v${dv} / app v${av}`
+  };
+}
+
+function runFeatureFlowChecks() {
+  const checks = [];
+  try {
+    const seed = '第一段原文。\n\n第二段原文。\n\n第三段原文。';
+    const patched = insertTemplateSentenceAtParagraph(seed, '测试模板句', 2);
+    const ps = splitParagraphs(patched);
+    const ok = ps[1] && ps[1].startsWith('测试模板句');
+    checks.push({
+      name: '模板句分段插入',
+      ok: !!ok,
+      detail: ok ? '插入第2段生效' : '未按段位插入'
+    });
+  } catch (err) {
+    checks.push({ name: '模板句分段插入', ok: false, detail: `异常：${err?.message || '未知错误'}` });
+  }
+
+  try {
+    const topic = '有人担忧，有人觉得正常，你有怎样的思考？';
+    const draft = '这是一段草稿。\n\n第二段内容。\n\n第三段收束。';
+    const report = runOffTopicCheck(topic, draft);
+    const fixed = applyTriadGapFix(topic, draft, report);
+    const ok = typeof fixed.highlightStart === 'number' && typeof fixed.highlightEnd === 'number';
+    checks.push({
+      name: '补缺自动高亮',
+      ok: !!ok,
+      detail: ok ? '已返回新增句高亮范围' : '未返回高亮范围'
+    });
+  } catch (err) {
+    checks.push({ name: '补缺自动高亮', ok: false, detail: `异常：${err?.message || '未知错误'}` });
+  }
+
+  try {
+    const topic = '一个人乐意去探索陌生世界，仅仅是因为好奇心吗？';
+    const analysis = analyzeEssayTopic(topic);
+    const a = generateFullEssayDraft(topic, analysis, 800, 850, { casePool: 'tech' });
+    const b = generateFullEssayDraft(topic, analysis, 800, 850, { casePool: 'culture' });
+    const ok = a !== b && /科技创新|模型|技术|算法/.test(a) && /文化传播|戏曲|导赏/.test(b);
+    checks.push({
+      name: '案例素材池分流',
+      ok: !!ok,
+      detail: ok ? '不同素材池生成差异已生效' : '素材池差异不明显'
+    });
+  } catch (err) {
+    checks.push({ name: '案例素材池分流', ok: false, detail: `异常：${err?.message || '未知错误'}` });
+  }
+
+  return checks;
+}
+
+function runRegressionSuite() {
+  const cases = [];
+
+  try {
+    const topic = '一个人乐意去探索陌生世界，仅仅是因为好奇心吗？';
+    const focused = '好奇心固然是探索的起点，但真正持久的探索还来自责任感与价值目标。因为面对现实问题，人们需要通过实践不断修正判断。因此，探索不是浅层尝鲜，而是问题意识驱动的深入行动。当然，这一判断也并非绝对成立，不同情境下动因会发生变化。';
+    const drifting = '人生需要努力。我们要积极向上，保持热爱，追求梦想。很多事情都值得尝试，这说明成长很重要。';
+    const good = runOffTopicCheck(topic, focused).riskScore;
+    const bad = runOffTopicCheck(topic, drifting).riskScore;
+    cases.push({ name: '扣题风险分层', ok: good > bad, detail: `聚焦稿 ${good} / 漂移稿 ${bad}` });
+  } catch (err) {
+    cases.push({ name: '扣题风险分层', ok: false, detail: `异常：${err?.message || '未知错误'}` });
+  }
+
+  try {
+    const topic = '有人担忧，有人觉得正常，你有怎样的思考？';
+    const poor = '我认为这个问题很重要。我们应该重视它。生活中有很多类似现象，所以值得思考。';
+    const boosted = applyScoreBoostRewrite(topic, poor);
+    cases.push({
+      name: '一键提分不反向下滑',
+      ok: boosted.after.total >= boosted.before.total,
+      detail: `改写前 ${boosted.before.total} / 改写后 ${boosted.after.total}`
+    });
+  } catch (err) {
+    cases.push({ name: '一键提分不反向下滑', ok: false, detail: `异常：${err?.message || '未知错误'}` });
+  }
+
+  try {
+    const topic = '由“专”到“传”，必定要经过“转”吗？';
+    const analysis = analyzeEssayTopic(topic);
+    const tech = generateFullEssayDraft(topic, analysis, 800, 850, { casePool: 'tech' });
+    const culture = generateFullEssayDraft(topic, analysis, 800, 850, { casePool: 'culture' });
+    const ok = tech !== culture && /模型|技术|科技创新/.test(tech) && /戏曲|导赏|文化传播/.test(culture);
+    cases.push({ name: '素材池分流', ok, detail: ok ? '科技/文化素材已区分' : '不同素材池输出差异不足' });
+  } catch (err) {
+    cases.push({ name: '素材池分流', ok: false, detail: `异常：${err?.message || '未知错误'}` });
+  }
+
+  try {
+    const topic = '生活中，人们常用认可度判别事物，区分高下。';
+    const draft = '认可度很重要。\n\n第二段只是举例，没有解释。\n\n结尾也比较空。';
+    const report = runOffTopicCheck(topic, draft);
+    const advice = report.paragraphAdvice?.[1];
+    const rewritten = rewriteParagraphByAdvice(topic, draft, advice);
+    const ok = rewritten.ok && rewritten.newDraft !== draft;
+    cases.push({ name: '段落级一键改写', ok, detail: ok ? '可完成整段替换' : '未能生成有效改写' });
+  } catch (err) {
+    cases.push({ name: '段落级一键改写', ok: false, detail: `异常：${err?.message || '未知错误'}` });
+  }
+
+  const passed = cases.filter((x) => x.ok).length;
+  return {
+    cases,
+    passed,
+    total: cases.length,
+    level: passed === cases.length ? '通过' : (passed >= cases.length - 1 ? '基本通过' : '未通过')
+  };
+}
+
+function renderRegressionReport(report, container) {
+  const rows = (report.cases || []).map((item) => `
+    <div class="score-row">
+      <div class="score-row-top"><span>${escapeHtml(item.name)}</span><strong>${item.ok ? '通过' : '失败'}</strong></div>
+      <p class="agent-para-issues">${escapeHtml(item.detail)}</p>
+    </div>
+  `).join('');
+  container.innerHTML = `
+    <div class="agent-result-head">
+      <h3>回归测试报告</h3>
+      <div class="agent-tags">
+        <span class="agent-tag">结果：${escapeHtml(report.level)}</span>
+        <span class="agent-tag">通过：${report.passed}/${report.total}</span>
+      </div>
+    </div>
+    <div class="agent-result-block"><h4>回归样例</h4><div class="score-grid">${rows}</div></div>
+  `;
+}
+
+function buildBaselineFixSuggestion(name) {
+  if (name === '页面核心元素') return '检查 index.html 是否误删按钮或输入框，并确认 id 与脚本一致。';
+  if (name === '关键函数可用') return '检查 app.js 是否加载失败或存在语法错误。';
+  if (name === '一键范文按钮绑定') return '刷新到带版本号地址，并确认按钮 data-bound-generate=1。';
+  if (name === '本地存储读写') return '关闭无痕模式后重试，或检查浏览器隐私策略。';
+  if (name === '脚本版本一致性') return '统一 data.js / app.js 的 ?v 参数。';
+  if (name === '回归测试样例') return '优先检查 runOffTopicCheck、generateFullEssayDraft、rewriteParagraphByAdvice 三条主链。';
+  return '根据失败项逐条排查。';
 }
 
 function renderEssaySampleList(container, activeFilter, favorites) {
@@ -708,6 +2521,147 @@ function loadEssayFavorites() {
 
 function saveEssayFavorites(set) {
   try { localStorage.setItem(ESSAY_FAVORITES_STORAGE_KEY, JSON.stringify([...set])); } catch (_) {}
+}
+
+function loadTrainingStats() {
+  try {
+    const raw = localStorage.getItem(TRAINING_STATS_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    if (!parsed || typeof parsed !== 'object') return { count: 0, dims: {} };
+    return { count: parsed.count || 0, dims: parsed.dims || {} };
+  } catch (_) {
+    return { count: 0, dims: {} };
+  }
+}
+
+function updateTrainingStats(dimensions) {
+  if (!Array.isArray(dimensions) || !dimensions.length) return;
+  const stats = loadTrainingStats();
+  stats.count += 1;
+  dimensions.forEach((d) => {
+    const key = d.label;
+    const prev = stats.dims[key] || { sum: 0, max: d.max || 20, times: 0 };
+    prev.sum += d.score;
+    prev.max = d.max || prev.max || 20;
+    prev.times += 1;
+    stats.dims[key] = prev;
+  });
+  try { localStorage.setItem(TRAINING_STATS_STORAGE_KEY, JSON.stringify(stats)); } catch (_) {}
+}
+
+function loadErrorBook() {
+  try {
+    const raw = localStorage.getItem(ERROR_BOOK_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    if (!parsed || typeof parsed !== 'object') return { records: [], tags: {} };
+    return {
+      records: Array.isArray(parsed.records) ? parsed.records : [],
+      tags: parsed.tags && typeof parsed.tags === 'object' ? parsed.tags : {}
+    };
+  } catch (_) {
+    return { records: [], tags: {} };
+  }
+}
+
+function saveErrorBook(book) {
+  try { localStorage.setItem(ERROR_BOOK_STORAGE_KEY, JSON.stringify(book)); } catch (_) {}
+}
+
+function extractErrorTags({ draft, score, offTopic }) {
+  const tags = [];
+  const hasDraftText = typeof draft === 'string' && draft.trim().length > 0;
+  const wordCount = hasDraftText ? countWords(draft) : Number(score?.stats?.wordCount || 0);
+  const dims = offTopic?.scaffold?.dimensions || [];
+  const d = (id) => dims.find((x) => x.id === id)?.score ?? 100;
+  if (d('d1') < 65) tags.push('题眼覆盖不足');
+  if (d('d2') < 65 || (offTopic?.precision?.oppositionCoverage?.score ?? 100) < 60) tags.push('辩证覆盖不足');
+  if (d('d3') < 65) tags.push('机制解释不足');
+  if (d('d4') < 65) tags.push('现实关联不足');
+  if (d('d5') < 65 || (offTopic?.precision?.risingQuality?.score ?? 100) < 60) tags.push('边界收束薄弱');
+  if (d('d6') < 65) tags.push('结构节奏松散');
+  if ((score?.dimensions || []).find((x) => x.label === '审题立意')?.score < 15) tags.push('审题立意偏弱');
+  if ((score?.dimensions || []).find((x) => x.label === '论证与材料')?.score < 15) tags.push('论证材料偏弱');
+  if ((score?.dimensions || []).find((x) => x.label === '语言表达')?.score < 15) tags.push('语言表达偏弱');
+  if ((score?.dimensions || []).find((x) => x.label === '思辨深度')?.score < 15) tags.push('思辨深度不足');
+  if (wordCount > 0 && wordCount < 760) tags.push('字数不足');
+  if (wordCount > 920) tags.push('篇幅冗余');
+  (offTopic?.flawScan || []).forEach((item) => {
+    if (/绝对化/.test(item.name)) tags.push('结论绝对化');
+    if (/例证堆砌/.test(item.name)) tags.push('例证堆砌');
+    if (/单边论证/.test(item.name)) tags.push('单边论证');
+  });
+  return dedupeArray(tags).slice(0, 8);
+}
+
+function recordErrorBookEntry({ topic, draft, score, offTopic, source }) {
+  const book = loadErrorBook();
+  const tags = extractErrorTags({ draft, score, offTopic });
+  if (!tags.length) return;
+  const fingerprint = `${topicTrainingKey(topic)}|${tags.join('|')}|${countWords(draft || '')}`;
+  const last = book.records[book.records.length - 1];
+  if (last && last.fingerprint === fingerprint && Math.abs(Date.now() - Number(last.ts || 0)) < 15000) return;
+
+  const entry = {
+    topic: topicTrainingKey(topic),
+    source: source || 'manual',
+    tags,
+    wordCount: countWords(draft || ''),
+    ts: Date.now(),
+    fingerprint
+  };
+  book.records.push(entry);
+  if (book.records.length > 80) book.records = book.records.slice(-80);
+  tags.forEach((tag) => {
+    const prev = book.tags[tag] || { count: 0, lastTopic: '', lastTs: 0 };
+    prev.count += 1;
+    prev.lastTopic = entry.topic;
+    prev.lastTs = entry.ts;
+    book.tags[tag] = prev;
+  });
+  saveErrorBook(book);
+}
+
+function buildErrorDrillFromTag(tag) {
+  if (tag === '题眼覆盖不足') return { drill: '练习：每段首句必须回扣题眼，写3个不同版本。', prompt: '请围绕题眼，写3个段首回扣句。' };
+  if (tag === '辩证覆盖不足') return { drill: '练习：补一段“诚然-然而-因此”三句辩证论证。', prompt: '请写一段含诚然、然而、因此的辩证论证。' };
+  if (tag === '机制解释不足') return { drill: '练习：任选1个例子，补2句“为什么能证明观点”的机制解释。', prompt: '请给例子补写两句机制解释。' };
+  if (tag === '现实关联不足') return { drill: '练习：把观点放进校园/平台/社会场景，各写1句现实落点。', prompt: '请补3句现实关联句，分别对应校园、平台、社会。' };
+  if (tag === '边界收束薄弱') return { drill: '练习：写2句条件化结尾，必须含“前提/边界/未必”。', prompt: '请写两个有边界条件的结尾句。' };
+  if (tag === '结构节奏松散') return { drill: '练习：按“界定-论证-收束”把草稿重分三段。', prompt: '请把当前草稿整理成界定、论证、收束三段。' };
+  if (tag === '结论绝对化') return { drill: '练习：把5个绝对词改成条件化表述。', prompt: '请把绝对化表达改成条件化判断。' };
+  if (tag === '例证堆砌') return { drill: '练习：删1个例子，补1条分析链。', prompt: '请减少例证堆砌，改成机制分析。' };
+  if (tag === '单边论证') return { drill: '练习：补另一端价值与风险，各写1句。', prompt: '请补写另一端的价值和风险。' };
+  if (tag === '字数不足') return { drill: '练习：补“现实分析段 + 条件收束段”各2句。', prompt: '请补足字数，增加现实分析和结尾收束。' };
+  return { drill: '练习：围绕该错因补一段“观点-依据-分析”闭环。', prompt: `请围绕“${tag}”做专项训练。` };
+}
+
+function buildErrorBookSummary(report) {
+  const currentTags = extractErrorTags({ score: report, offTopic: report.offTopic || report });
+  const book = loadErrorBook();
+  const top = Object.entries(book.tags || {})
+    .map(([tag, info]) => ({ tag, count: Number(info.count || 0), lastTopic: info.lastTopic || '' }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 5);
+  const drills = top.slice(0, 3).map((item) => ({ ...item, ...buildErrorDrillFromTag(item.tag) }));
+  const recent = (book.records || []).slice(-5).reverse();
+  return { currentTags, top, drills, recent, total: (book.records || []).length };
+}
+
+function buildWeakTrainingPlan(report) {
+  const stats = loadTrainingStats();
+  const current = (report.dimensions || []).map((d) => {
+    const avg = stats.dims?.[d.label]?.times ? (stats.dims[d.label].sum / stats.dims[d.label].times) : d.score;
+    return { label: d.label, score: d.score, avg };
+  });
+  const weak = current.sort((a, b) => (a.score + a.avg) - (b.score + b.avg)).slice(0, 2);
+  const plan = weak.map((w) => {
+    if (w.label === '审题立意') return { label: w.label, drill: '练习：给同一题写3个“条件化立场句”，每句必须含“前提/边界”。', prompt: '请写3个不同立场的条件化中心论点句。' };
+    if (w.label === '结构章法') return { label: w.label, drill: '练习：把一段散文改成“界定-论证-收束”三段，每段2句。', prompt: '请把草稿改写为三段结构，每段2句。' };
+    if (w.label === '论证与材料') return { label: w.label, drill: '练习：任选1个例子，补写2句“机制解释”，禁止只叙事。', prompt: '请给这个例子补两句机制解释。' };
+    if (w.label === '语言表达') return { label: w.label, drill: '练习：删去3句口号句，改成“判断句+依据句”。', prompt: '请将口号化句子改成判断+依据表达。' };
+    return { label: w.label, drill: '练习：补一段“诚然-然而-因此”三句论证并写边界条件。', prompt: '请写一段三句辩证论证，包含边界条件。' };
+  });
+  return { count: stats.count, weak: plan };
 }
 
 function initEvolutionOverview() {
@@ -773,6 +2727,7 @@ function initTimeline() {
   const yearFilter = document.getElementById('timelineYearFilter');
   const typeFilter = document.getElementById('timelineTypeFilter');
   const summary = document.getElementById('timelineFilterSummary');
+  const scoreGuideBox = document.getElementById('timelineScoreGuide');
   if (!container || !Array.isArray(TIMELINE_DATA)) return;
 
   const years = dedupeArray(TIMELINE_DATA.map((item) => String(item.year))).sort((a, b) => Number(b) - Number(a));
@@ -811,8 +2766,9 @@ function initTimeline() {
           <div class="timeline-topic">${escapeHtml(item.topic)}</div>
           <div class="timeline-philosophy">${escapeHtml(item.philosophy)} ｜ ${escapeHtml(t)}</div>
           ${item.prompt ? `<p style="margin:6px 0 0;color:var(--muted);font-size:12px;line-height:1.5;">${escapeHtml(item.prompt)}</p>` : ''}
-          <div style="margin-top:8px;">
+          <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;">
             <button class="agent-btn ghost timeline-train-btn" type="button" data-year="${escapeHtml(item.year)}">训练此题</button>
+            <button class="agent-btn ghost timeline-score-btn" type="button" data-year="${escapeHtml(item.year)}">评分标准摘要</button>
           </div>
         </div>`;
     }).join('');
@@ -826,13 +2782,27 @@ function initTimeline() {
   yearFilter?.addEventListener('change', render);
   typeFilter?.addEventListener('change', render);
   container.addEventListener('click', (event) => {
+    const scoreBtn = event.target.closest('.timeline-score-btn');
+    if (scoreBtn) {
+      const year = scoreBtn.dataset.year || '';
+      renderTimelineScoreGuide(year, scoreGuideBox);
+      return;
+    }
     const trigger = event.target.closest('.timeline-train-btn, .timeline-train-item');
     if (!trigger) return;
     const card = trigger.classList.contains('timeline-train-item') ? trigger : trigger.closest('.timeline-train-item');
     if (!card) return;
     startTrainingFromTimelineCard(card);
   });
+  renderTimelineScoreGuide('2025', scoreGuideBox);
   render();
+}
+
+function renderTimelineScoreGuide(year, box) {
+  if (!box) return;
+  const y = String(year || '');
+  const text = TIMELINE_SCORE_GUIDE[y] || '该年份暂无专门摘要，建议按“审题立意、论证链、边界结论、语言表达”四项进行自检。';
+  box.innerHTML = `<div class="score-guide-card"><strong>${escapeHtml(y)}年评分标准摘要（参考）</strong><p>${escapeHtml(text)}</p></div>`;
 }
 
 function getTimelineStageRange(stageId) {
@@ -901,6 +2871,121 @@ function detectTopicType(topic) {
   return { code: 'phenomenon', name: '现象思辨型' };
 }
 
+function normalizeTopicPhrases(items) {
+  const stop = ['请写一篇文章', '谈谈你的认识', '谈谈你的思考', '你有怎样的思考', '请联系社会生活', '自拟题目', '不少于', '要求'];
+  return dedupeArray((items || []).filter((x) => x && x.length <= 10 && !stop.some((s) => x.includes(s)))).slice(0, 8);
+}
+
+function detectHiddenPremise(topic, topicType, topicPhrases) {
+  const text = String(topic || '');
+  const key = topicPhrases[0] || '该命题';
+  if (/必定/.test(text)) return `命题预设“存在一条稳定路径”，你要回答这条路径是否具有必然性。`;
+  if (/仅仅/.test(text)) return `命题预设“单一动机解释不足”，你要处理多重动因。`;
+  if (/是否/.test(text)) return `命题预设“二元判断可成立”，你要改写为条件化判断。`;
+  if (topicType.code === 'relation') return `命题预设“两个概念存在张力”，你要写清二者如何互相制约。`;
+  return `命题预设“${key}可被直接理解”，你需要先界定概念再下结论。`;
+}
+
+function buildExaminerIntent(topic, topicType, topicPhrases) {
+  const key = topicPhrases[0] || '该概念';
+  const key2 = topicPhrases[1] || '另一端';
+  const rows = [
+    `考察“思辨张力”：你能否在“${key}${topicType.code === 'relation' ? `—${key2}` : ''}”之间搭桥，而非二选一站队。`,
+    '考察“时代回声”：你是否把抽象概念放进当下社会情境，而不是空谈哲理。',
+    '考察“反套路能力”：是否有独立判断，而非名言堆砌与套话复述。'
+  ];
+  return rows;
+}
+
+function buildThreeStepAnalysis(topic, topicType, topicPhrases) {
+  const key = topicPhrases[0] || '核心词';
+  const key2 = topicPhrases[1] || '关联概念';
+  return [
+    `第一步 概念边界：先定义“${key}”指什么、不指什么。`,
+    topicType.code === 'relation'
+      ? `第二步 矛盾机制：写清“${key}”与“${key2}”为何冲突、何时转化。`
+      : '第二步 机制深挖：解释为何会出现争议，给出“前提-机制-结果”链条。',
+    '第三步 高阶立意：不要停在“兼顾就好”，要给出价值重定义与边界判断。'
+  ];
+}
+
+function buildMustAnswerChecklist(topic, topicType, topicPhrases, hiddenPremise) {
+  const key = topicPhrases[0] || '题眼';
+  const list = [
+    `我是否定义了“${key}”而不是直接表态？`,
+    '我是否写出至少一条“因为-所以-因此”的机制链？',
+    topicType.code === 'relation'
+      ? '我是否真正处理了两端价值，而非只写一端？'
+      : '我是否回应了反方或例外情形？',
+    '我的结尾是否有边界条件，而非绝对化结论？',
+    `我是否回应了题目隐含前提：${hiddenPremise}`
+  ];
+  return list;
+}
+
+function buildExamReadyTemplates(topic, topicType, topicPhrases) {
+  const key = topicPhrases[0] || '该命题';
+  const key2 = topicPhrases[1] || '另一端';
+  return {
+    opening: `先不急于站队。面对“${topic}”，我先界定“${key}”的内涵与边界。`,
+    turning: topicType.code === 'relation'
+      ? `诚然，只强调“${key}”会让论证更直接；然而，忽视“${key2}”会让结论失衡。`
+      : '然而，离开前提谈结论，往往会把合理判断推向片面化。',
+    rising: `在可量化与高效率并行的时代，对“${key}”作条件化判断，本质上是在捍卫理性与主体性。`
+  };
+}
+
+function buildMustAnswerQuestions(topic, topicType, topicPhrases, hiddenPremise) {
+  const key = topicPhrases[0] || '该概念';
+  const key2 = topicPhrases[1] || '另一概念';
+  const common = [
+    `“${key}”在这道题里具体指什么？哪些情况不算？`,
+    `你的结论在什么前提下成立？在哪些边界下失效？`,
+    `你是否给出“机制解释”而不是只给态度？`
+  ];
+  if (topicType.code === 'relation') {
+    common.splice(1, 0, `“${key}”与“${key2}”是替代关系、并列关系，还是递进关系？`);
+  }
+  if (/专.*转.*传/.test(String(topic || ''))) {
+    common.splice(1, 0, '“专、转、传”三者中，哪一环决定“传”的质量？为什么？');
+  }
+  common.push(`你是否回应了隐含前提：${hiddenPremise}`);
+  return common.slice(0, 5);
+}
+
+function buildTopicPitfalls(topic, topicType, topicPhrases) {
+  const key = topicPhrases[0] || '题眼';
+  const items = [
+    `只复述材料，不解释“${key}”的定义与边界。`,
+    '只有立场没有机制：整篇都在“我认为”，没有“为什么”。',
+    '结论绝对化：频繁使用“必然、唯一、绝对”却不给条件。'
+  ];
+  if (topicType.code === 'relation') items.push('单边论证：只写一端优点，忽视另一端价值与风险。');
+  if (/专.*转.*传/.test(String(topic || ''))) items.push('把“转”简单写成“转发量”，忽视“转译质量”与“失真风险”。');
+  return items.slice(0, 5);
+}
+
+function buildTopicThesis(topic, topicType, topicPhrases) {
+  const key = topicPhrases[0] || '该命题';
+  const key2 = topicPhrases[1] || '另一端';
+  if (topicType.code === 'relation') return `本文主张：处理“${key}—${key2}”不能二选一，应在条件与边界中作动态判断。`;
+  if (topicType.code === 'value') return `本文主张：${key}是否成立，不取决于情绪好恶，而取决于价值标准、现实代价与长期后果。`;
+  if (topicType.code === 'method') return `本文主张：讨论${key}时，应先界定问题，再建立“前提-机制-结果”链条。`;
+  return `本文主张：${key}并非天然成立，必须通过现实机制与反例检验来确认其有效性。`;
+}
+
+function buildTopicOutline(topic, topicType, topicPhrases, thesis) {
+  const key = topicPhrases[0] || '该命题';
+  const key2 = topicPhrases[1] || key;
+  return [
+    `第一段：界定“${key}”并回应题目问法，提出中心论点：${thesis}`,
+    topicType.code === 'relation'
+      ? `第二段：双边论证“${key}”与“${key2}”的作用与代价，加入一处“诚然-然而”转折。`
+      : `第二段：用“前提-机制-结果”展开论证，至少给1个例证并解释其证明力。`,
+    '第三段：处理反方质疑，给出条件化结论与边界条款，完成升华。'
+  ];
+}
+
 function buildStanceOptions(topic, topicType, topicPhrases) {
   const key = topicPhrases[0] || '该题核心概念';
   const key2 = topicPhrases[1] || key;
@@ -913,11 +2998,45 @@ function buildStanceOptions(topic, topicType, topicPhrases) {
 
 function buildExamReadySentences(topic, topicType, topicPhrases) {
   const key = topicPhrases[0] || '该命题';
+  const key2 = topicPhrases[1] || '另一端概念';
+  const relationTurn = `诚然，若只强调一端，判断会更省力；然而，题目的难点恰在于处理两端张力。`;
+  const valueTurn = `判断“值得与否”不能停在情绪好恶，应回到标准、代价与长期后果。`;
+  const methodTurn = `与其追问唯一答案，不如先搭建“前提-机制-结果”的论证链条。`;
   return {
-    opening: `面对“${topic}”，先界定“${key}”的含义，再讨论其成立条件。`,
-    thesis: topicType.code === 'relation' ? `本文认为，“${key}”并非非此即彼，应在张力中判断。` : `本文主张：${key}的有效性取决于前提是否满足。`,
-    closing: '回到题目，关键不是给唯一答案，而是作出条件化、负责任的判断。'
+    opening: `开篇先回应题目：面对“${topic}”，我先界定“${key}”的内涵，再讨论其成立条件。`,
+    thesis: topicType.code === 'relation'
+      ? `本文主张：“${key}”与“${key2}”并非非此即彼，应在关系与边界中作判断。`
+      : `本文主张：${key}是否成立，取决于前提是否满足与机制是否闭合。`,
+    turning: topicType.code === 'relation' ? relationTurn : (topicType.code === 'value' ? valueTurn : methodTurn),
+    closing: '结尾回到题目问法：不给绝对答案，而给条件化、可检验、能落地的结论。'
   };
+}
+
+function buildExamTemplateSets(topic, topicType, topicPhrases) {
+  const key = topicPhrases[0] || '该命题';
+  const key2 = topicPhrases[1] || '另一端概念';
+  const openings = [
+    `面对“${topic}”，我先界定“${key}”的含义，再讨论其成立边界。`,
+    `这道题看似在问“是或否”，实则在考查我们如何处理“${key}”的条件关系。`,
+    `与其急于站队，不如先追问：在何种前提下，“${key}”才成立？`
+  ];
+  const turnings = topicType.code === 'relation'
+    ? [
+      `诚然，只强调“${key}”会让论证更直接；然而，忽视“${key2}”会让结论失衡。`,
+      `进一步看，题目并不鼓励二选一，而要求在张力中寻找更高层次的统一。`,
+      `换言之，关键不在否定任何一端，而在解释二者如何互相制约与转化。`
+    ]
+    : [
+      '诚然，直观判断往往有其合理性；然而，若缺少机制解释，结论就会变得脆弱。',
+      '进一步而言，案例本身不是答案，关键在于案例背后的结构性原因。',
+      '但也要看到，任何判断都有边界，离开前提谈结论只会制造误导。'
+    ];
+  const risings = [
+    `回到题目，真正重要的不是给出唯一答案，而是给出可检验、可落地的条件化判断。`,
+    `当我们把“${key}”放进现实实践中检验，思辨才会从纸面走向行动。`,
+    '因此，好的作文不止于表态，更在于建立标准、呈现边界、回应时代问题。'
+  ];
+  return { openings, turnings, risings };
 }
 
 function extractTopicPhrases(topic) {
@@ -931,6 +3050,21 @@ function splitParagraphs(text) {
 
 function splitSentences(text) {
   return String(text || '').split(/[。！？.!?；;]/).map((x) => x.trim()).filter(Boolean);
+}
+
+function analyzeSentenceQuality(topic, draft, topicPhrases) {
+  const sentences = splitSentences(draft).filter((s) => s.length >= 8 && s.length <= 90);
+  const scored = sentences.map((s) => {
+    const topicHit = (topicPhrases || []).slice(0, 4).filter((k) => s.includes(k)).length;
+    const logic = countMatches(s, /(因为|所以|因此|然而|另一方面|前提|条件|边界|由此)/gi);
+    const abstract = countMatches(s, /(机制|本质|价值|实践|结构|关系|标准)/gi);
+    const empty = countMatches(s, /(我们要|应该|必须|显而易见|毋庸置疑)/gi);
+    const score = clamp(topicHit * 20 + logic * 15 + abstract * 10 - empty * 18 + 35, 0, 100);
+    return { sentence: ensureSentenceEnding(s), score };
+  });
+  const good = [...scored].sort((a, b) => b.score - a.score).slice(0, 3).filter((x) => x.score >= 70).map((x) => x.sentence);
+  const bad = [...scored].sort((a, b) => a.score - b.score).slice(0, 3).filter((x) => x.score <= 55).map((x) => x.sentence);
+  return { good, bad };
 }
 
 function countWords(text) {
@@ -986,12 +3120,13 @@ function renderExamCountdown(el, sec) {
 }
 
 function getShanghaiBand(total) {
-  if (total >= 90) return '一类上';
-  if (total >= 80) return '一类卷';
-  if (total >= 70) return '二类卷';
-  if (total >= 60) return '三类卷';
-  if (total >= 50) return '四类卷';
-  return '五类卷';
+  if (total >= 92) return '一类上（约65-70分）';
+  if (total >= 85) return '一类中（约60-64分）';
+  if (total >= 78) return '一类下（约56-59分）';
+  if (total >= 70) return '二类卷（约49-55分）';
+  if (total >= 62) return '三类卷（约42-48分）';
+  if (total >= 54) return '四类卷（约35-41分）';
+  return '五类卷（约34分及以下）';
 }
 
 function normalizeRiskClass(level) {

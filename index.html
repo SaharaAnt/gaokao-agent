@@ -52,6 +52,14 @@
 
       <div class="agent-actions">
         <button id="analyzeTopicBtn" class="agent-btn primary">分析题目</button>
+        <button id="generateFullEssayBtn" class="agent-btn primary">一键生成800-850字范文</button>
+        <select id="casePoolSelect" class="timeline-select" title="案例素材池">
+          <option value="auto">案例素材池：自动匹配</option>
+          <option value="tech">案例素材池：科技创新</option>
+          <option value="edu">案例素材池：教育成长</option>
+          <option value="culture">案例素材池：文化传播</option>
+          <option value="society">案例素材池：社会治理</option>
+        </select>
         <button id="sampleTopicBtn" class="agent-btn ghost">填充示例</button>
         <button id="randomTopicBtn" class="agent-btn ghost">一键抽题训练</button>
         <button id="showDemoCardBtn" class="agent-btn ghost">加载示范题卡</button>
@@ -86,6 +94,9 @@
       <div class="agent-actions secondary">
         <button id="offTopicCheckBtn" class="agent-btn ghost">防跑题检查</button>
         <button id="scoreDraftBtn" class="agent-btn primary">草稿评分</button>
+        <button id="improveDraftBtn" class="agent-btn ghost">一键提分改写</button>
+        <button id="regressionTestBtn" class="agent-btn ghost">回归测试</button>
+        <button id="baselineCheckBtn" class="agent-btn ghost">基础自检</button>
       </div>
 
       <div id="agentResult" class="agent-result" aria-live="polite">
@@ -111,10 +122,11 @@
       </select>
       <span id="timelineFilterSummary" class="timeline-filter-summary"></span>
     </div>
+    <div id="timelineScoreGuide" class="timeline-score-guide"></div>
     <div class="timeline" id="timelineContainer"></div>
   </section>
 
-  <script src="data.js"></script>
-  <script src="app.js"></script>
+  <script src="data.js?v=36"></script>
+  <script src="app.js?v=36"></script>
 </body>
 </html>

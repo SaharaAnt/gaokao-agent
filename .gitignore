@@ -1,0 +1,4 @@
+_tmp_docx_extract/
+*.log
+Thumbs.db
+.DS_Store
