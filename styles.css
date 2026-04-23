@@ -149,12 +149,14 @@ body {
 .essay-lib-star.active { border-color: #f59e0b; background: rgba(245, 158, 11, 0.2); }
 
 .material-card-lab { margin-top: 10px; border: 1px solid var(--line); border-radius: 14px; padding: 10px; background: rgba(240, 253, 250, 0.78); }
+.example-card-lab { background: rgba(254, 249, 195, 0.42); }
 .material-card-tip { margin: 4px 0 8px; color: #3f5688; font-size: 13px; line-height: 1.6; }
 .material-input { width: 100%; border: 1px solid rgba(148, 163, 184, 0.5); border-radius: 12px; color: #1f2a44; background: #fff; padding: 10px 12px; font: inherit; }
 .material-body { min-height: 130px; }
 .material-card-list { display: grid; gap: 8px; margin-top: 10px; }
 .material-card-empty { border: 1px dashed rgba(14, 165, 233, 0.4); border-radius: 12px; padding: 10px; color: #466392; background: rgba(255, 255, 255, 0.72); }
 .material-card-item { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; border: 1px solid var(--line); border-radius: 12px; padding: 10px; background: rgba(255, 255, 255, 0.9); }
+.example-card-item { border-color: rgba(251, 191, 36, 0.45); background: linear-gradient(180deg, rgba(255,255,255,0.96), rgba(255,247,237,0.9)); }
 .material-card-main { display: grid; gap: 5px; min-width: 0; }
 .material-card-main strong { color: #1f2a44; }
 .material-card-main span { color: #64748b; font-size: 13px; line-height: 1.5; }

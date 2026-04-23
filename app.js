@@ -303,6 +303,7 @@ function initAgentWorkbench() {
   const createMaterialCardBtn = document.getElementById('createMaterialCardBtn');
   const clearMaterialInputBtn = document.getElementById('clearMaterialInputBtn');
   const materialCardList = document.getElementById('materialCardList');
+  const exampleTrainingList = document.getElementById('exampleTrainingList');
   const examCountdown = document.getElementById('examCountdown');
   const examWordCount = document.getElementById('examWordCount');
   const startExamModeBtn = document.getElementById('startExamModeBtn');
@@ -317,6 +318,7 @@ function initAgentWorkbench() {
   renderEssayFilterBar(essayFilterBar, uiState.activeFilter, uiState.favorites);
   renderEssaySampleList(essaySampleList, uiState.activeFilter, uiState.favorites);
   renderMaterialCardList(materialCardList);
+  renderExampleTrainingList(exampleTrainingList);
   updateExamWordCountDisplay(draftInput, examWordCount);
   renderExamCountdown(examCountdown, examState.remaining);
 
@@ -479,7 +481,44 @@ function initAgentWorkbench() {
     }
   });
 
+  const handleExampleCardAction = (target) => {
+    const viewBtn = target.closest('.example-card-view');
+    if (viewBtn) {
+      const card = findExampleTrainingCardById(viewBtn.dataset.exampleId || '');
+      if (!card) return true;
+      resultContainer.innerHTML = renderTrainingExampleDetail(card);
+      return true;
+    }
+    const trainBtn = target.closest('.example-card-train');
+    if (trainBtn) {
+      const card = findExampleTrainingCardById(trainBtn.dataset.exampleId || '');
+      if (!card) return true;
+      topicInput.value = card.topic || card.title || '';
+      if (casePoolSelect) casePoolSelect.value = 'examplelib';
+      renderAgentResult(analyzeEssayTopic(topicInput.value), resultContainer);
+      topicInput.focus();
+      document.getElementById('agentWorkbench')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return true;
+    }
+    const saveBtn = target.closest('.example-card-save');
+    if (saveBtn) {
+      const card = findExampleTrainingCardById(saveBtn.dataset.exampleId || '');
+      if (!card) return true;
+      const saved = saveMaterialCard(convertExampleTrainingCardToMaterialCard(card));
+      renderMaterialCardList(materialCardList);
+      if (casePoolSelect) casePoolSelect.value = 'mycards';
+      resultContainer.innerHTML = renderMaterialCardCreatedReport(saved);
+      return true;
+    }
+    return false;
+  };
+
+  exampleTrainingList?.addEventListener('click', (e) => {
+    handleExampleCardAction(e.target);
+  });
+
   resultContainer.addEventListener('click', (e) => {
+    if (handleExampleCardAction(e.target)) return;
     const convertBtn = e.target.closest('.convert-four-block-btn');
     if (convertBtn) {
       const topic = topicInput.value.trim();
@@ -950,6 +989,8 @@ function renderAgentResult(analysis, container) {
   const highScoreLang = highScoreGuide.languageTips.map((x) => `<li>${escapeHtml(x)}</li>`).join('');
   const highScorePit = highScoreGuide.pitfalls.map((x) => `<li>${escapeHtml(x)}</li>`).join('');
   const threePathKit = analysis.threePathKit || { concept: [], classify: [], reality: [], caution: '' };
+  const matchedExamples = pickRelevantExampleCards(analysis.topic, analysis.topicType, 3);
+  const matchedExampleRows = renderTrainingExampleQuickRows(matchedExamples);
   const pathTraining = getPathTrainingState(analysis.topic);
   const pathStepRows = renderPathStepRows(pathTraining);
   const conceptRows = (threePathKit.concept || []).map((x) => `<li>${escapeHtml(x)}</li>`).join('');
@@ -1015,6 +1056,11 @@ function renderAgentResult(analysis, container) {
       <div class="agent-actions secondary">
         <button class="agent-btn primary three-path-card-btn" type="button">一键写入三路径草稿</button>
       </div>
+    </div>
+    <div class="agent-result-block">
+      <h4>匹配到的上海范例训练卡</h4>
+      <p>下面这些卡片来自《作文范例 25-26》提炼，可直接借结构、借点评、借训练动作。</p>
+      <div class="score-grid">${matchedExampleRows}</div>
     </div>
     <div class="agent-result-block">
       <h4>逐步训练模式（长期提分）</h4>
@@ -1577,7 +1623,7 @@ function buildEssayTemplateByType(topic, key, key2, topicType, casePool) {
 
 function getSelectedCasePool(selectEl) {
   const val = (selectEl?.value || 'auto').trim();
-  const allow = ['auto', 'tech', 'edu', 'culture', 'society', 'mycards'];
+  const allow = ['auto', 'tech', 'edu', 'culture', 'society', 'examplelib', 'mycards'];
   return allow.includes(val) ? val : 'auto';
 }
 
@@ -1585,6 +1631,10 @@ function pickCaseMaterial(casePool, topicType, topic = '') {
   if (casePool === 'mycards') {
     const card = pickMaterialCardForTopic(topic, topicType);
     if (card) return materialFromCard(card);
+  }
+  const exampleCard = pickExampleTrainingCardForTopic(topic, topicType);
+  if (casePool === 'examplelib' && exampleCard) {
+    return materialFromTrainingExampleCard(exampleCard);
   }
   const poolMap = {
     tech: {
@@ -1608,6 +1658,9 @@ function pickCaseMaterial(casePool, topicType, topic = '') {
       link: '公共判断必须兼顾效率、公平与可持续性'
     }
   };
+  if (casePool === 'auto' && exampleCard && exampleCard.matchScore >= 20) {
+    return materialFromTrainingExampleCard(exampleCard);
+  }
   if (casePool && casePool !== 'auto' && poolMap[casePool]) return poolMap[casePool];
   const autoByType = topicType === 'value'
     ? poolMap.society
@@ -1767,6 +1820,146 @@ function materialFromCard(card) {
     link,
     card
   };
+}
+
+function loadExampleTrainingLibrary() {
+  return Array.isArray(SHANGHAI_EXAMPLE_LIBRARY) ? SHANGHAI_EXAMPLE_LIBRARY : [];
+}
+
+function findExampleTrainingCardById(id) {
+  return loadExampleTrainingLibrary().find((card) => card.id === id) || null;
+}
+
+function scoreExampleTrainingCard(card, topic, topicType) {
+  const text = String(topic || '');
+  let score = 0;
+  (card.keywords || []).forEach((kw) => {
+    if (kw && text.includes(kw)) score += 16;
+  });
+  if (card.topic && text.includes(card.topic.slice(0, 8))) score += 26;
+  const typeName = typeof topicType === 'string'
+    ? ({ relation: '关系辩证题', value: '价值判断题', problem: '问题式命题', phenomenon: '问题式命题' }[topicType] || topicType)
+    : topicType?.name;
+  if (typeName && (card.categories || []).includes(typeName)) score += 12;
+  if (/(如何|怎样|是否|吗|思考)/.test(text) && (card.categories || []).includes('问题式命题')) score += 6;
+  return score;
+}
+
+function pickRelevantExampleCards(topic, topicType, limit = 3) {
+  return loadExampleTrainingLibrary()
+    .map((card) => ({ ...card, matchScore: scoreExampleTrainingCard(card, topic, topicType) }))
+    .filter((card) => card.matchScore > 0)
+    .sort((a, b) => b.matchScore - a.matchScore)
+    .slice(0, limit);
+}
+
+function pickExampleTrainingCardForTopic(topic, topicType) {
+  return pickRelevantExampleCards(topic, topicType, 1)[0] || null;
+}
+
+function convertExampleTrainingCardToMaterialCard(card) {
+  return {
+    id: `example-${card.id}`,
+    title: `范例训练卡｜${card.title}`,
+    topic: card.topic,
+    thesis: card.thesis,
+    structure: card.structure || [],
+    materials: card.materials || [],
+    goldenSentences: card.goldenSentences || [],
+    tags: dedupeArray([...(card.categories || []), ...(card.tags || []), '上海范例库']),
+    source: `${card.source || '范例提炼'} / ${card.school || ''}`.trim(),
+    wordCount: 0,
+    createdAt: Date.now()
+  };
+}
+
+function materialFromTrainingExampleCard(card) {
+  const material = (card.materials || [])[0] || (card.goldenSentences || [])[0] || card.thesis || card.title;
+  return {
+    domain: `上海范例库：${card.title}`,
+    example: material,
+    link: card.highlight || card.thesis || '范例训练卡提供了可借鉴的结构与立意',
+    card
+  };
+}
+
+function renderExampleTrainingList(container) {
+  if (!container) return;
+  const list = loadExampleTrainingLibrary();
+  if (!list.length) {
+    container.innerHTML = '<div class="material-card-empty">暂无内置范例训练卡。</div>';
+    return;
+  }
+  container.innerHTML = list.map((card) => `
+    <div class="material-card-item example-card-item">
+      <div class="material-card-main">
+        <strong>${escapeHtml(card.title)}</strong>
+        <span>${escapeHtml(card.school || '')} ｜ ${escapeHtml(card.topic)}</span>
+        <span>${escapeHtml(card.focus || '')}</span>
+        <div class="agent-tags">${[card.grade, ...(card.categories || []).slice(0, 2), ...(card.tags || []).slice(0, 2)].filter(Boolean).map((tag) => `<span class="agent-tag">${escapeHtml(tag)}</span>`).join('')}</div>
+      </div>
+      <div class="material-card-actions">
+        <button class="agent-btn ghost example-card-view" type="button" data-example-id="${escapeHtml(card.id)}">查看</button>
+        <button class="agent-btn ghost example-card-train" type="button" data-example-id="${escapeHtml(card.id)}">练此题</button>
+        <button class="agent-btn ghost example-card-save" type="button" data-example-id="${escapeHtml(card.id)}">收进素材卡</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+function renderTrainingExampleQuickRows(cards) {
+  if (!cards.length) {
+    return '<div class="flaw-row"><p>当前题目暂未命中内置范例，可继续按“三路径”正常训练。</p></div>';
+  }
+  return cards.map((card) => `
+    <div class="flaw-row">
+      <div class="flaw-row-top"><span>${escapeHtml(card.title)}</span><strong>${escapeHtml(card.school || '')}</strong></div>
+      <p>${escapeHtml(card.highlight || card.focus || '')}</p>
+      <div class="agent-actions secondary">
+        <button class="agent-btn ghost example-card-view" type="button" data-example-id="${escapeHtml(card.id)}">查看范例卡</button>
+        <button class="agent-btn ghost example-card-train" type="button" data-example-id="${escapeHtml(card.id)}">直接练这题</button>
+        <button class="agent-btn ghost example-card-save" type="button" data-example-id="${escapeHtml(card.id)}">收进素材卡</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+function renderTrainingExampleDetail(card) {
+  const structureRows = (card.structure || []).map((x) => `<li>${escapeHtml(x)}</li>`).join('');
+  const materialRows = (card.materials || []).map((x) => `<li>${escapeHtml(x)}</li>`).join('');
+  const sentenceRows = (card.goldenSentences || []).map((x) => `<li class="sentence-good">${escapeHtml(x)}</li>`).join('');
+  return `
+    <div class="agent-result-head">
+      <h3>上海范例训练卡</h3>
+      <div class="agent-tags">
+        <span class="agent-tag">${escapeHtml(card.school || '来源未标注')}</span>
+        <span class="agent-tag">${escapeHtml(card.grade || '范例')}</span>
+        ${(card.categories || []).map((tag) => `<span class="agent-tag">${escapeHtml(tag)}</span>`).join('')}
+      </div>
+    </div>
+    <div class="agent-result-block">
+      <h4>${escapeHtml(card.title)}</h4>
+      <p><strong>对应题目：</strong>${escapeHtml(card.topic)}</p>
+      <p><strong>命题意图：</strong>${escapeHtml(card.intent || '待补充')}</p>
+      <p><strong>核心立场：</strong>${escapeHtml(card.thesis || '待补充')}</p>
+    </div>
+    <div class="agent-result-block"><h4>可借鉴结构</h4><ol>${structureRows || '<li>暂无结构信息</li>'}</ol></div>
+    <div class="agent-result-block"><h4>可借鉴素材</h4><ul>${materialRows || '<li>暂无素材句</li>'}</ul></div>
+    <div class="agent-result-block"><h4>高分句式</h4><ul>${sentenceRows || '<li>暂无高分句式</li>'}</ul></div>
+    <div class="agent-result-block">
+      <h4>教师点评提炼</h4>
+      <p><strong>亮点：</strong>${escapeHtml(card.highlight || '待补充')}</p>
+      <p><strong>易失分点：</strong>${escapeHtml(card.risk || '待补充')}</p>
+    </div>
+    <div class="agent-result-block">
+      <h4>推荐训练动作</h4>
+      <p>${escapeHtml(card.trainingPrompt || '请围绕这张卡重新写一版三段提纲。')}</p>
+      <div class="agent-actions secondary">
+        <button class="agent-btn ghost example-card-train" type="button" data-example-id="${escapeHtml(card.id)}">直接练这题</button>
+        <button class="agent-btn ghost example-card-save" type="button" data-example-id="${escapeHtml(card.id)}">收进素材卡</button>
+      </div>
+    </div>
+  `;
 }
 
 function pickMaterialCardForTopic(topic, topicType) {
@@ -2589,6 +2782,7 @@ function runBaselineHealthCheck() {
     'materialBodyInput',
     'createMaterialCardBtn',
     'materialCardList',
+    'exampleTrainingList',
     'regressionTestBtn',
     'baselineCheckBtn',
     'agentResult'
@@ -2779,6 +2973,18 @@ function runFeatureFlowChecks() {
     checks.push({ name: '素材卡提取', ok: false, detail: `异常：${err?.message || '未知错误'}` });
   }
 
+  try {
+    const card = pickExampleTrainingCardForTopic('有人认为共情有助于道德的落实，也有人认为共情会妨碍道德的实施。对此你怎么看？', { name: '关系辩证题' });
+    const ok = !!card && /共情与道德/.test(card.title);
+    checks.push({
+      name: '上海范例训练库',
+      ok,
+      detail: ok ? '可命中并调用内置范例训练卡' : '未能命中对应范例卡'
+    });
+  } catch (err) {
+    checks.push({ name: '上海范例训练库', ok: false, detail: `异常：${err?.message || '未知错误'}` });
+  }
+
   return checks;
 }
 
@@ -2826,6 +3032,16 @@ function runRegressionSuite() {
     cases.push({ name: '素材池分流', ok, detail: ok ? '科技/文化素材已区分' : '不同素材池输出差异不足' });
   } catch (err) {
     cases.push({ name: '素材池分流', ok: false, detail: `异常：${err?.message || '未知错误'}` });
+  }
+
+  try {
+    const topic = '请写一篇文章，谈谈你对“简即为美”这个观点的认识与思考。';
+    const analysis = analyzeEssayTopic(topic);
+    const essay = generateFullEssayDraft(topic, analysis, 800, 850, { casePool: 'examplelib' });
+    const ok = /简即为美|简约/.test(essay) && /丰盈|繁/.test(essay);
+    cases.push({ name: '上海范例库接入生成', ok, detail: ok ? '范例库素材可参与生成' : '生成结果未体现范例库特征' });
+  } catch (err) {
+    cases.push({ name: '上海范例库接入生成', ok: false, detail: `异常：${err?.message || '未知错误'}` });
   }
 
   try {
@@ -2899,6 +3115,7 @@ function buildBaselineFixSuggestion(name) {
   if (name === '脚本版本一致性') return '统一 data.js / app.js 的 ?v 参数。';
   if (name === '回归测试样例') return '优先检查 runOffTopicCheck、generateFullEssayDraft、rewriteParagraphByAdvice 三条主链。';
   if (name === '素材卡提取') return '检查素材卡导入器相关函数和 localStorage 是否正常，并确认正文中有题目、立意或例证句。';
+  if (name === '上海范例训练库') return '检查 data.js 中的 SHANGHAI_EXAMPLE_LIBRARY 是否正常加载，并确认 exampleTrainingList 容器未丢失。';
   return '根据失败项逐条排查。';
 }
 

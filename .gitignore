@@ -1,4 +1,5 @@
 _tmp_docx_extract/
+_tmp_docx_examples/
 *.log
 Thumbs.db
 .DS_Store

@@ -59,6 +59,7 @@
           <option value="edu">案例素材池：教育成长</option>
           <option value="culture">案例素材池：文化传播</option>
           <option value="society">案例素材池：社会治理</option>
+          <option value="examplelib">案例素材池：上海范例库</option>
           <option value="mycards">案例素材池：我的素材卡</option>
         </select>
         <button id="sampleTopicBtn" class="agent-btn ghost">填充示例</button>
@@ -85,6 +86,12 @@
           <button id="clearMaterialInputBtn" class="agent-btn ghost">清空输入</button>
         </div>
         <div id="materialCardList" class="material-card-list"></div>
+      </div>
+
+      <div class="material-card-lab example-card-lab" id="exampleTrainingLab">
+        <div class="essay-library-title">上海范例训练库（内置）</div>
+        <p class="material-card-tip">已把《作文范例 25-26》中的题目解析、佳作亮点和教师点评提炼成训练卡，可直接查看、练此题、收进素材卡并参与范文生成。</p>
+        <div id="exampleTrainingList" class="material-card-list"></div>
       </div>
 
       <label class="agent-label draft-label" for="essayDraftInput">作文草稿（用于评分与防跑题检查）</label>
@@ -142,7 +149,7 @@
     <div class="timeline" id="timelineContainer"></div>
   </section>
 
-  <script src="data.js?v=42"></script>
-  <script src="app.js?v=42"></script>
+  <script src="data.js?v=43"></script>
+  <script src="app.js?v=43"></script>
 </body>
 </html>
