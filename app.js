@@ -357,7 +357,7 @@ function initAgentWorkbench() {
       score70: score.score70,
       riskLevel: score.offTopic?.riskLevel || '中',
       source: 'score',
-      topicType: detectTopicType(topic)
+      topicType: detectTopicType(topic).name
     });
     recordErrorBookEntry({ topic, draft, score, offTopic: score.offTopic, source: 'score' });
     renderScoreReport(score, resultContainer);
@@ -377,7 +377,7 @@ function initAgentWorkbench() {
       score70: boost.after.score70,
       riskLevel: boost.after.offTopic?.riskLevel || '中',
       source: 'boost',
-      topicType: detectTopicType(topic)
+      topicType: detectTopicType(topic).name
     });
     renderScoreBoostReport(boost, resultContainer);
   });
@@ -620,7 +620,14 @@ function initAgentWorkbench() {
       const boost = applyScoreBoostRewrite(topic, draft);
       draftInput.value = boost.newDraft;
       updateExamWordCountDisplay(draftInput, examWordCount);
-      updateTrainingStats(boost.after.dimensions);
+      updateTrainingStats(boost.after.dimensions, {
+        topic,
+        total: boost.after.total,
+        score70: boost.after.score70,
+        riskLevel: boost.after.offTopic?.riskLevel || '中',
+        source: 'boost',
+        topicType: detectTopicType(topic).name
+      });
       renderScoreBoostReport(boost, resultContainer);
       return;
     }
@@ -729,7 +736,14 @@ function bindGenerateEssayButton(btn, topicInput, draftInput, resultContainer, e
       updateExamWordCountDisplay(draftInput, examWordCount);
       const offTopic = runOffTopicCheck(topic, fullEssay);
       const score = scoreEssayDraft(topic, fullEssay);
-      updateTrainingStats(score.dimensions);
+      updateTrainingStats(score.dimensions, {
+        topic,
+        total: score.total,
+        score70: score.score70,
+        riskLevel: score.offTopic?.riskLevel || '中',
+        source: 'generate',
+        topicType: detectTopicType(topic).name
+      });
       renderGeneratedEssayReport({
         topic,
         draft: fullEssay,
@@ -764,7 +778,14 @@ window.quickGenerateEssay = () => {
     updateExamWordCountDisplay(draftInput, examWordCount);
     const offTopic = runOffTopicCheck(topic, fullEssay);
     const score = scoreEssayDraft(topic, fullEssay);
-    updateTrainingStats(score.dimensions);
+    updateTrainingStats(score.dimensions, {
+      topic,
+      total: score.total,
+      score70: score.score70,
+      riskLevel: score.offTopic?.riskLevel || '中',
+      source: 'generate',
+      topicType: detectTopicType(topic).name
+    });
     renderGeneratedEssayReport({
       topic,
       draft: fullEssay,
@@ -805,7 +826,6 @@ function analyzeEssayTopic(topic) {
   const outline = buildTopicOutline(topic, topicType, topicPhrases, thesis);
   return {
     topic,
-    draft,
     topicType,
     topicPhrases,
     rankedCategories,
@@ -2445,6 +2465,14 @@ function runFeatureFlowChecks() {
 
 function runRegressionSuite() {
   const cases = [];
+
+  try {
+    const analysis = analyzeEssayTopic('一个人乐意去探索陌生世界，仅仅是因为好奇心吗？');
+    const ok = !!analysis && Array.isArray(analysis.outline) && analysis.outline.length >= 3 && Array.isArray(analysis.topicPhrases);
+    cases.push({ name: '分析题目主链', ok, detail: ok ? '可稳定产出审题结构' : '分析结果结构不完整' });
+  } catch (err) {
+    cases.push({ name: '分析题目主链', ok: false, detail: `异常：${err?.message || '未知错误'}` });
+  }
 
   try {
     const topic = '一个人乐意去探索陌生世界，仅仅是因为好奇心吗？';
