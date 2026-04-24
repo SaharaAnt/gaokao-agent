@@ -1569,14 +1569,15 @@ function applyTriadEnhancement(draft, analysis) {
   const paragraphs = splitParagraphs(draft);
   if (!paragraphs.length) return draft;
   const key = analysis.topicPhrases?.[0] || '该命题';
+  const exampleDriven = !!analysis.exampleGuidedKit?.anchorCard;
   const addLogic = '其关键正在于：当前提成立，某种力量便会通过具体机制转化为现实结果。';
   const addTurn = `诚然，${key}在某些情境下具有合理性；然而，一旦离开边界，它的力量也可能转化为局限。`;
   const addLanguage = '也唯有如此，判断才既见锋芒，也存分寸。';
 
-  if (paragraphs[1] && !/(前提|机制|结果)/.test(paragraphs[1])) {
+  if (paragraphs[1] && !/(前提|机制|结果|本质|关键正在于)/.test(paragraphs[1])) {
     paragraphs[1] = `${paragraphs[1]}${addLogic}`;
   }
-  if (paragraphs[2] && !/(诚然|然而)/.test(paragraphs[2])) {
+  if (!exampleDriven && paragraphs[2] && !/(诚然|然而)/.test(paragraphs[2])) {
     paragraphs[2] = `${paragraphs[2]}${addTurn}`;
   }
   const lastIdx = paragraphs.length - 1;
@@ -1683,7 +1684,86 @@ function normalizeStructureStepText(text, fallback) {
     .trim() || fallback;
 }
 
+function composeEssayParagraph(parts) {
+  return (parts || [])
+    .map((part) => String(part || '').trim())
+    .filter(Boolean)
+    .map((part) => ensureSentenceEnding(part))
+    .join('');
+}
+
+function buildExampleLeadSentence(topic, key, exampleCard) {
+  if (exampleCard?.id === 'example-declutter-true-self') {
+    return '在物质丰裕而内心拥堵的今天，“断舍离”从整理术语变成流行生活方式，并不偶然。';
+  }
+  if (/是否|吗|？|\?/.test(String(topic || ''))) {
+    return `面对“${topic}”这样的追问，最容易犯的错误，是太快表态，而太慢思考。`;
+  }
+  if ((exampleCard?.categories || []).includes('关系辩证题')) {
+    return `“${key}”之所以值得反复讨论，恰在于现实从来不允许它被写成单边答案。`;
+  }
+  return `围绕“${key}”的讨论之所以值得认真对待，正在于它牵连的不只是态度，更是判断标准。`;
+}
+
+function buildDeclutterEssayTemplateFromExample(topic, analysis, exampleCard, casePool) {
+  const material = (casePool === 'examplelib' || casePool === 'auto')
+    ? materialFromTrainingExampleCard(exampleCard)
+    : pickCaseMaterial(casePool, analysis.topicType?.code || 'phenomenon', topic);
+  const thesis = exampleCard?.thesis || analysis.thesis || '断舍离是通向自我澄明的手段，而不是目的本身。';
+  const golden = (exampleCard?.goldenSentences || []).filter(Boolean);
+  return [
+    composeEssayParagraph([
+      '在物质丰裕而内心拥堵的今天，“断舍离”从整理术语变成流行生活方式，并不偶然',
+      '人们热衷于清空衣橱、删减信息、重整关系，表面上是在做减法，实则是在追问：什么才值得留下',
+      '若把“断舍离”仅理解为扔掉旧物，便把它写浅了；若把它理解为对责任、关系和过往的轻快切断，又把它写偏了',
+      thesis
+    ]),
+    composeEssayParagraph([
+      '断舍离之所以在今天格外流行，首先是因为现代生活确实太容易把人填满',
+      '消费主义不断制造“还缺一点”的幻觉，社交媒体持续推送“别人都在拥有”的样板，学习与工作也往往把资料、任务、人际联络层层叠加',
+      '东西更多了，选择更多了，人的秩序感却未必因此增加',
+      '恰恰相反，过量占据常使人失去判断：哪些是真正需要，哪些只是惯性；哪些值得珍视，哪些不过出于恐惧失去',
+      `正是在这样的现实压力下，${material.example || '减法才成为当代人的自救方式'}`
+    ]),
+    composeEssayParagraph([
+      '更重要的是，断舍离真正发生作用的地方，不在垃圾袋里，而在人的判断里',
+      '当一个人开始清理堆积的物品、信息乃至无效关系时，他并不只是删除外物，而是在逼迫自己回答：我为何留着它，我又为何舍不得它',
+      '有些占有来自真实需要，有些依附却只是虚荣、焦虑与自我证明',
+      golden[0] || '断舍离真正要清除的，不只是堆积之物，更是遮蔽内心的惯性与依附',
+      '筛掉不必要的占据后，那些仍被郑重保留的东西，往往才更接近一个人内心的真实所求'
+    ]),
+    composeEssayParagraph([
+      '然而，若把断舍离推向绝对，它就会从自我澄明的手段滑向逃避现实的借口',
+      '有人把它写成极简生活的赞歌，以为东西越少、人越高级；也有人借“做减法”之名，轻率切断关系、回避责任、拒绝承受复杂生活的重量',
+      '可真正成熟的断舍离，从来不是任性切割，而是有判断地取舍',
+      golden[1] || '删减从来不是终点，借由删减看清自己要守住什么，才是它真正的意义'
+    ]),
+    composeEssayParagraph([
+      '把目光放回现实，这一点尤须强调',
+      '在信息过载的时代，我们当然需要删去无效输入；在消费诱惑无处不在的环境里，我们也当然需要摆脱被物欲牵着走的生活方式',
+      '但与此同时，一个人不能因为“轻装上阵”就抛开家庭责任，不能因为“远离消耗”就拒绝所有难以处理的人际，也不能因为“整理自我”就回避公共生活中的承担',
+      '真实所求并不是一删就自动显现，它常常是在取舍、试错与反思中逐步显影',
+      `从${material.domain}的现实提醒看，${material.link || '真正可贵的不是删减动作本身，而是删减之后仍能守住价值次序'}`
+    ]),
+    composeEssayParagraph([
+      '因此，我更愿意把断舍离理解为一种重新排序的能力，而不是一种值得神圣化的生活姿态',
+      thesis,
+      golden[2] || '一个人能否认清真实所求，不取决于他丢掉了多少，而取决于他留下的东西是否经过清醒选择',
+      '唯有如此，减法才不会沦为空洞姿态，取舍才会通向更澄明的自我'
+    ])
+  ];
+}
+
+function buildSpecializedEssayTemplateFromExample(topic, analysis, exampleCard, casePool) {
+  if (exampleCard?.id === 'example-declutter-true-self') {
+    return buildDeclutterEssayTemplateFromExample(topic, analysis, exampleCard, casePool);
+  }
+  return null;
+}
+
 function buildEssayTemplateFromExample(topic, analysis, exampleCard, casePool) {
+  const specialized = buildSpecializedEssayTemplateFromExample(topic, analysis, exampleCard, casePool);
+  if (specialized?.length) return specialized;
   const material = (casePool === 'examplelib' || casePool === 'auto')
     ? materialFromTrainingExampleCard(exampleCard)
     : pickCaseMaterial(casePool, analysis.topicType?.code || 'phenomenon', topic);
@@ -1700,37 +1780,42 @@ function buildEssayTemplateFromExample(topic, analysis, exampleCard, casePool) {
   const step1 = normalizeStructureStepText(structure[0], `解释“${key}”为何会成为争议中心`);
   const step2 = normalizeStructureStepText(structure[1], '把另一端的限制、代价与边界补充出来');
   const step3 = normalizeStructureStepText(structure[2], '把抽象命题落到现实结构与时代处境之中');
+  const lead = buildExampleLeadSentence(topic, key, exampleCard);
 
   return [
-    [
-      `围绕“${topic}”的讨论，表面上是在判断一种说法是否成立，实则是在辨认某种关系应当如何被理解。`,
-      `${introFocus}。`,
+    composeEssayParagraph([
+      lead,
+      introFocus,
       thesis
-    ].join(''),
-    [
-      `先看第一层：${step1}。`,
-      `${materials[0] || `例如，${material.example}。`}`,
-      `这说明，讨论“${key}”时不能停在态度判断，而必须先交代其成立的现实基础。`
-    ].join(''),
-    [
-      `进一步看，${step2}。`,
-      `${materials[1] || golden[0] || '现实中的复杂性，恰恰要求我们给出机制解释，而不是只堆态度。'}。`,
-      `${golden[0] || '只有把现象放回结构与因果链里，判断才不会浮在表面。'}`
-    ].join(''),
-    [
-      `当然，若把上述判断推向绝对，原本有解释力的立场也会迅速失真。`,
-      `${riskTip}。`,
-      `${golden[1] || '因此，结论必须补出边界、前提与例外，而不是把一时立场写成永久真理。'}`
-    ].join(''),
-    [
-      `把视角拉回当下社会，${step3}。`,
-      `从${material.domain}的现实场景看，${material.link}。`,
-      `${materials[2] || '也正是在这里，抽象命题才真正与时代处境发生了联系。'}`
-    ].join(''),
-    [
-      `回到题目，我的结论是：${thesis}`,
-      `${golden[2] || golden[golden.length - 1] || '当判断能够回应现实、承认边界并指向实践时，思辨才真正具有力量。'}`
-    ].join('')
+    ]),
+    composeEssayParagraph([
+      `${step1}并非偶然`,
+      materials[0] || material.example,
+      `也正是在这样的现实处境中，“${key}”才不断进入公共讨论`,
+      '若不先交代它何以出现，后文的判断就难免显得悬空'
+    ]),
+    composeEssayParagraph([
+      `如果说上一层回答的是“${key}”为何会出现，那么这一层要回答的便是：它何以成立`,
+      step2,
+      materials[1] || golden[0] || '现实中的复杂性，恰恰要求我们给出机制解释，而不是只堆态度',
+      golden[0] || '只有把现象放回结构与因果链里，判断才不会浮在表面'
+    ]),
+    composeEssayParagraph([
+      '但任何看似有效的方法，一旦被神圣化，就会迅速走向自己的反面',
+      riskTip,
+      golden[1] || '因此，结论必须补出边界、前提与例外，而不是把一时立场写成永久真理'
+    ]),
+    composeEssayParagraph([
+      '把目光重新放回时代现场，问题会看得更清楚',
+      step3,
+      `在${material.domain}的现实场景中，${material.link || material.example}`,
+      materials[2] || '也正是在这里，抽象命题才真正与时代处境发生联系'
+    ]),
+    composeEssayParagraph([
+      '回到题目，真正可靠的结论从来不是最响亮的结论，而是最经得起追问的结论',
+      thesis,
+      golden[2] || golden[golden.length - 1] || '当判断能够回应现实、承认边界并指向实践时，思辨才真正具有力量'
+    ])
   ];
 }
 
@@ -2015,6 +2100,7 @@ function buildExampleGuidedKit(topic, topicType, topicPhrases) {
   ]).filter(Boolean).slice(0, 4);
   const generatorHints = dedupeArray([
     `生成时优先沿用“${anchor.title}”的结构节奏，不要一上来就空泛表态。`,
+    '成文时不要写成“先看第一层、进一步看”式讲评提纲，而要写成自然推进的正式议论文段落。',
     (anchor.materials || [])[0] ? `正文可优先转写这条现实支点：${anchor.materials[0]}` : '',
     (anchor.goldenSentences || [])[0] ? `结尾可借这类收束方式：${anchor.goldenSentences[0]}` : ''
   ]).filter(Boolean).slice(0, 3);
