@@ -205,6 +205,22 @@ body {
 .flaw-actions { margin-top: 8px; display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
 .flaw-target { font-size: 12px; color: var(--muted); }
 .flaw-fix-btn { border: 1px solid rgba(16, 185, 129, 0.45); background: rgba(16, 185, 129, 0.14); color: #065f46; border-radius: 8px; padding: 5px 8px; cursor: pointer; }
+.tier-essay-card { border: 1px solid var(--line); border-radius: 14px; padding: 10px; background: linear-gradient(180deg, rgba(255,255,255,0.96), rgba(240,249,255,0.92)); }
+.tier-essay-card + .tier-essay-card { margin-top: 10px; }
+.tier-essay-summary { cursor: pointer; display: flex; justify-content: space-between; align-items: center; gap: 8px; font-weight: 800; color: #1d355f; }
+.tier-essay-summary strong { color: #0369a1; font-size: 14px; }
+.tier-essay-meta { margin-top: 10px; }
+.tier-essay-meta p { margin: 6px 0; }
+.tier-essay-body { margin-top: 10px; border: 1px solid rgba(125, 155, 212, 0.34); border-radius: 12px; padding: 12px; background: rgba(255,255,255,0.88); color: #1f2a44; line-height: 1.9; }
+.tier-essay-annotated { display: grid; gap: 12px; margin-top: 10px; }
+.tier-essay-paragraph-row { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(280px, 0.9fr); gap: 12px; align-items: start; }
+.tier-essay-paragraph-label { font-size: 12px; font-weight: 700; color: #0369a1; margin-bottom: 8px; }
+.tier-essay-note { border: 1px solid var(--line); border-radius: 12px; padding: 10px; background: rgba(255,255,255,0.96); }
+.tier-essay-note p { margin: 6px 0; color: #3f5688; line-height: 1.7; }
+.tier-essay-note strong { color: #1d355f; }
+.tier-essay-note.high { background: rgba(236, 253, 245, 0.95); border-color: rgba(16, 185, 129, 0.28); }
+.tier-essay-note.mid { background: rgba(239, 246, 255, 0.95); border-color: rgba(59, 130, 246, 0.28); }
+.tier-essay-note.basic { background: rgba(255, 247, 237, 0.95); border-color: rgba(245, 158, 11, 0.28); }
 
 .timeline-section { max-width: 1000px; margin: 0 auto; padding: 10px 20px 60px; }
 .timeline { display: grid; gap: 8px; }
@@ -258,6 +274,7 @@ body {
   .evo-grid { grid-template-columns: 1fr; }
   .evo-bottom { grid-template-columns: 1fr; }
   .week-bar-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .tier-essay-paragraph-row { grid-template-columns: 1fr; }
 }
 @media (max-width: 640px) {
   .hero-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }

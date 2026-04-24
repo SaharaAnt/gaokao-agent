@@ -284,6 +284,7 @@ function initAgentWorkbench() {
   const draftInput = document.getElementById('essayDraftInput');
   const analyzeBtn = document.getElementById('analyzeTopicBtn');
   const generateFullEssayBtn = document.getElementById('generateFullEssayBtn');
+  const generateTieredEssayBtn = document.getElementById('generateTieredEssayBtn');
   const casePoolSelect = document.getElementById('casePoolSelect');
   const sampleBtn = document.getElementById('sampleTopicBtn');
   const randomTopicBtn = document.getElementById('randomTopicBtn');
@@ -314,6 +315,7 @@ function initAgentWorkbench() {
 
   const uiState = { activeFilter: 'all', favorites: loadEssayFavorites() };
   const examState = { running: false, paused: false, remaining: EXAM_MODE_DURATION_SEC, timer: null };
+  let tieredEssayCache = [];
 
   renderEssayFilterBar(essayFilterBar, uiState.activeFilter, uiState.favorites);
   renderEssaySampleList(essaySampleList, uiState.activeFilter, uiState.favorites);
@@ -329,6 +331,14 @@ function initAgentWorkbench() {
   });
 
   bindGenerateEssayButton(generateFullEssayBtn, topicInput, draftInput, resultContainer, examWordCount, casePoolSelect);
+  generateTieredEssayBtn?.addEventListener('click', () => {
+    const topic = topicInput.value.trim();
+    if (!topic) return void (resultContainer.innerHTML = '<p class="agent-empty">请先输入作文题目。</p>');
+    const analysis = analyzeEssayTopic(topic);
+    const casePool = getSelectedCasePool(casePoolSelect);
+    tieredEssayCache = generateTieredEssaySet(topic, analysis, { casePool });
+    renderTieredEssayReport({ topic, tiers: tieredEssayCache }, resultContainer);
+  });
 
   sampleBtn?.addEventListener('click', () => { topicInput.value = AGENT_SAMPLE_TOPICS[Math.floor(Math.random() * AGENT_SAMPLE_TOPICS.length)]; topicInput.focus(); });
   randomTopicBtn?.addEventListener('click', () => {
@@ -764,6 +774,18 @@ function initAgentWorkbench() {
       document.getElementById('agentWorkbench')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
       return;
     }
+
+    const tierLoadBtn = e.target.closest('.tier-essay-load-btn');
+    if (tierLoadBtn) {
+      const idx = parseInt(tierLoadBtn.dataset.tierIndex || '-1', 10);
+      const tier = tieredEssayCache[idx];
+      if (!tier) return;
+      draftInput.value = tier.draft;
+      updateExamWordCountDisplay(draftInput, examWordCount);
+      resultContainer.insertAdjacentHTML('afterbegin', `<div class="agent-result-block"><p class="agent-para-issues low">已把“${escapeHtml(tier.bandLabel)}”加载到草稿框，可直接评分或继续改写。</p></div>`);
+      draftInput.focus();
+      return;
+    }
   });
 
   startExamModeBtn?.addEventListener('click', () => {
@@ -841,7 +863,8 @@ function bindGenerateEssayButton(btn, topicInput, draftInput, resultContainer, e
         draft: fullEssay,
         wordCount: countWords(fullEssay),
         score,
-        offTopic
+        offTopic,
+        exampleAnchorTitle: analysis.exampleGuidedKit?.anchorCard?.title || ''
       }, resultContainer);
     } catch (err) {
       const msg = err?.message || '未知错误';
@@ -883,7 +906,8 @@ window.quickGenerateEssay = () => {
       draft: fullEssay,
       wordCount: countWords(fullEssay),
       score,
-      offTopic
+      offTopic,
+      exampleAnchorTitle: analysis.exampleGuidedKit?.anchorCard?.title || ''
     }, resultContainer);
   } catch (err) {
     resultContainer.innerHTML = `<p class="agent-empty">范文生成失败：${escapeHtml(err?.message || '未知错误')}</p>`;
@@ -904,18 +928,33 @@ function analyzeEssayTopic(topic) {
   const rankedCategories = Object.keys(scores).sort((a, b) => scores[b] - scores[a]).filter((k) => scores[k] > 0).slice(0, 3);
   const topicType = detectTopicType(topic);
   const topicPhrases = normalizeTopicPhrases(extractTopicPhrases(topic));
+  const exampleGuidedKit = buildExampleGuidedKit(topic, topicType, topicPhrases);
   const hiddenPremise = detectHiddenPremise(topic, topicType, topicPhrases);
-  const mustAnswerQuestions = buildMustAnswerQuestions(topic, topicType, topicPhrases, hiddenPremise);
-  const pitfalls = buildTopicPitfalls(topic, topicType, topicPhrases);
-  const examinerIntent = buildExaminerIntent(topic, topicType, topicPhrases);
+  const mustAnswerQuestions = dedupeArray([
+    ...buildMustAnswerQuestions(topic, topicType, topicPhrases, hiddenPremise),
+    ...(exampleGuidedKit?.mustAnswers || [])
+  ]).slice(0, 6);
+  const pitfalls = dedupeArray([
+    ...(exampleGuidedKit?.pitfalls || []),
+    ...buildTopicPitfalls(topic, topicType, topicPhrases)
+  ]).slice(0, 6);
+  const examinerIntent = dedupeArray([
+    ...(exampleGuidedKit?.intent || []),
+    ...buildExaminerIntent(topic, topicType, topicPhrases)
+  ]).slice(0, 5);
   const threeStepAnalysis = buildThreeStepAnalysis(topic, topicType, topicPhrases);
-  const mustAnswerChecklist = buildMustAnswerChecklist(topic, topicType, topicPhrases, hiddenPremise);
+  const mustAnswerChecklist = dedupeArray([
+    ...buildMustAnswerChecklist(topic, topicType, topicPhrases, hiddenPremise),
+    ...(exampleGuidedKit?.mustAnswers || [])
+  ]).slice(0, 6);
   const examReadyTemplates = buildExamReadyTemplates(topic, topicType, topicPhrases);
   const triadTrainingKit = buildTriadTrainingKit(topic, topicType, topicPhrases);
   const threePathKit = buildThreePathMethodKit(topic, topicType, topicPhrases);
   const stanceOptions = buildStanceOptions(topic, topicType, topicPhrases);
-  const thesis = buildTopicThesis(topic, topicType, topicPhrases);
-  const outline = buildTopicOutline(topic, topicType, topicPhrases, thesis);
+  const thesis = exampleGuidedKit?.thesis || buildTopicThesis(topic, topicType, topicPhrases);
+  const outline = exampleGuidedKit?.structure?.length
+    ? exampleGuidedKit.structure
+    : buildTopicOutline(topic, topicType, topicPhrases, thesis);
   return {
     topic,
     topicType,
@@ -928,6 +967,7 @@ function analyzeEssayTopic(topic) {
     examReadyTemplates,
     triadTrainingKit,
     threePathKit,
+    exampleGuidedKit,
     hiddenPremise,
     mustAnswerQuestions,
     pitfalls,
@@ -990,7 +1030,23 @@ function renderAgentResult(analysis, container) {
   const highScorePit = highScoreGuide.pitfalls.map((x) => `<li>${escapeHtml(x)}</li>`).join('');
   const threePathKit = analysis.threePathKit || { concept: [], classify: [], reality: [], caution: '' };
   const matchedExamples = pickRelevantExampleCards(analysis.topic, analysis.topicType, 3);
+  const exampleGuidedKit = analysis.exampleGuidedKit || null;
   const matchedExampleRows = renderTrainingExampleQuickRows(matchedExamples);
+  const exampleGuidedBlock = exampleGuidedKit ? `
+    <div class="agent-result-block">
+      <h4>范例驱动题目解读</h4>
+      <p><strong>命中的母题</strong>：${escapeHtml(exampleGuidedKit.anchorCard?.title || '未命中')}</p>
+      <p><strong>这题真正要抓什么</strong></p>
+      <ul>${(exampleGuidedKit.intent || []).map((x) => `<li>${escapeHtml(x)}</li>`).join('')}</ul>
+      <p><strong>建议立意</strong>：${escapeHtml(exampleGuidedKit.thesis || '待提炼')}</p>
+      <p><strong>建议结构</strong></p>
+      <ol>${(exampleGuidedKit.structure || []).map((x) => `<li>${escapeHtml(x)}</li>`).join('')}</ol>
+      <p><strong>先避开的失误</strong></p>
+      <ul>${(exampleGuidedKit.pitfalls || []).map((x) => `<li>${escapeHtml(x)}</li>`).join('')}</ul>
+      <p><strong>生成提醒</strong></p>
+      <ul>${(exampleGuidedKit.generatorHints || []).map((x) => `<li>${escapeHtml(x)}</li>`).join('')}</ul>
+    </div>
+  ` : '';
   const pathTraining = getPathTrainingState(analysis.topic);
   const pathStepRows = renderPathStepRows(pathTraining);
   const conceptRows = (threePathKit.concept || []).map((x) => `<li>${escapeHtml(x)}</li>`).join('');
@@ -1012,6 +1068,7 @@ function renderAgentResult(analysis, container) {
       <h3>题目分析：${escapeHtml(analysis.topic)}</h3>
       <div class="agent-tags">${tags}<span class="agent-tag">题型：${escapeHtml(analysis.topicType.name)}</span></div>
     </div>
+    ${exampleGuidedBlock}
     <div class="agent-result-block"><h4>出题人意图（筛选什么）</h4><ul>${intentRows}</ul></div>
     <div class="agent-result-block"><h4>三步拆题法（立刻可用）</h4><ul>${stepRows}</ul></div>
     <div class="agent-result-block"><h4>必答清单（不答会掉档）</h4><ul>${checklistRows}</ul></div>
@@ -1512,9 +1569,9 @@ function applyTriadEnhancement(draft, analysis) {
   const paragraphs = splitParagraphs(draft);
   if (!paragraphs.length) return draft;
   const key = analysis.topicPhrases?.[0] || '该命题';
-  const addLogic = '这不是简单表态，而是有前提、有机制、有结果的判断。';
-  const addTurn = `诚然，${key}在某些情境下具有合理性；然而，离开边界谈结论会失真。`;
-  const addLanguage = '守住理性的底色，才能让判断既有锋芒也有分寸。';
+  const addLogic = '其关键正在于：当前提成立，某种力量便会通过具体机制转化为现实结果。';
+  const addTurn = `诚然，${key}在某些情境下具有合理性；然而，一旦离开边界，它的力量也可能转化为局限。`;
+  const addLanguage = '也唯有如此，判断才既见锋芒，也存分寸。';
 
   if (paragraphs[1] && !/(前提|机制|结果)/.test(paragraphs[1])) {
     paragraphs[1] = `${paragraphs[1]}${addLogic}`;
@@ -1531,34 +1588,33 @@ function applyTriadEnhancement(draft, analysis) {
 
 function buildEssayTemplateByType(topic, key, key2, topicType, casePool) {
   const material = pickCaseMaterial(casePool, topicType, topic);
-  const relationIntro = `面对“${topic}”，最容易出现的写法是迅速表态，但这往往会让论证停在直觉层面。`;
-  const baseDefine = `我更倾向于先界定“${key}”的含义，再讨论它在何种前提下成立、在何种情境下需要修正。`;
+  const relationIntro = `围绕“${topic}”形成争议，并不令人意外。`;
+  const baseDefine = `因为真正值得辨析的，从来不是一句响亮的表态，而是“${key}”究竟在什么前提下成立。`;
   if (topicType === 'relation') {
     return [
       [
         relationIntro,
-        baseDefine,
-        `题目真正的难点，不在于在“${key}”与“${key2}”之间二选一，而在于如何看见二者的互动关系。`
+        `在现实生活中，“${key}”与“${key2}”常被看作彼此牵扯的两端。`,
+        `${baseDefine}与其把二者写成非此即彼，不如追问它们如何在具体情境中相互校正。`
       ].join(''),
       [
-        `先肯定“${key}”的价值与必要性：它提供行动方向与现实动力。`,
+        `先看“${key}”的意义。很多时候，它之所以被反复提起，正因为它确实能够提供行动方向与现实动力。`,
         `例如，${material.example}。`,
-        `但如果只强调这一端，另一端的约束就会被遮蔽，判断会变得失衡。`,
-        `因此需要引入“${key2}”作为校正力量，解释二者如何互相制约与转化。`
+        `当一种力量切中现实难题时，它当然有存在的必要；问题只在于，若把这种必要性绝对化，判断便容易失衡。`
       ].join(''),
       [
-        `进一步而言，“${key}—${key2}”不是对立的终点，而是动态的张力结构。`,
-        `在不同情境下，两端的权重会发生变化，这正是现实复杂性的来源。`,
-        `所以高质量论证必须给出“何时偏向哪一端”的条件说明。`
+        `这时，“${key2}”的重要性才真正显现。它不是为了否定“${key}”，而是提醒我们：任何单一原则一旦脱离边界，都会从力量转化为局限。`,
+        `也正因如此，“${key}—${key2}”并非静止对立，而是一种随处境而变化的张力结构。`,
+        `不同情境下，两端的权重会发生调整，这恰恰构成了现实的复杂。`
       ].join(''),
       [
-        `把视角拉回到当下社会：在快速变化的时代，人们更需要在张力中保持判断能力。`,
-        `从${material.domain}场景看，${material.link}.`,
-        `这也意味着写作不能只给态度，而要给标准、给边界、给机制。`
+        `把视角拉回当下，这一点尤其重要。`,
+        `从${material.domain}场景看，${material.link}。`,
+        `时代越是变化迅速，人越不能依赖单边立场处理复杂问题，而更需要在张力中守住判断力。`
       ].join(''),
       [
-        `回到题目，我的结论是：处理“${key}—${key2}”不能二选一，应在条件与边界中作动态判断。`,
-        `当判断能够回应现实并可被检验时，思辨才真正落到行动。`
+        `因此，处理“${key}—${key2}”不能停在二选一。`,
+        `更稳妥的态度，是在条件中辨其轻重，在边界中见其转化，让判断既有方向，也有分寸。`
       ].join('')
     ];
   }
@@ -1566,57 +1622,114 @@ function buildEssayTemplateByType(topic, key, key2, topicType, casePool) {
   if (topicType === 'value') {
     return [
       [
-        `面对“${topic}”，最重要的是先澄清价值标准，而非急于立场表态。`,
-        baseDefine,
-        `只有把价值放进现实后果里衡量，判断才不会流于情绪化。`
+        `围绕“${topic}”的讨论，说到底是在追问一种价值标准是否可靠。`,
+        `${baseDefine}只有把标准放进现实后果里检验，判断才不会流于情绪化。`
       ].join(''),
       [
-        `先看到“${key}”之所以被认可，是因为它在协作中降低成本、提升效率。`,
+        `首先必须承认，“${key}”之所以广泛存在，自有其现实依据。`,
         `例如，${material.example}。`,
-        `然而，认可度并不等同于价值本体，流行并不自动等于正确。`,
-        `因此需要把“价值标准”与“社会认可”区分开来。`
+        `一个能在协作中降低成本、提高效率的判断标准，当然不可能毫无道理。`
       ].join(''),
       [
-        `进一步看，价值判断还必须考虑长期后果与公共影响。`,
-        `若只看短期可见性，很多真正重要的价值会被忽视。`,
-        `这就要求我们给出“何时有效、何时失效”的边界判断。`
+        `但问题也恰恰在这里：现实上有效，并不等于价值上充分。`,
+        `若只看当下的可见收益、眼前的多数选择，许多真正重要却不够喧哗的价值就会被遮蔽。`,
+        `因此，价值判断还必须纳入长期后果、公共影响与更深层的人之完整性。`
       ].join(''),
       [
-        `回到现实生活，人们在信息过载中更需要价值排序能力。`,
-        `尤其在${material.domain}领域，${material.link}.`,
-        `一篇好的作文，应当在标准、后果与边界中完成论证闭环。`
+        `尤其在信息过载的时代，人们比任何时候都更容易把“容易测量”误当成“真正重要”。`,
+        `而在${material.domain}领域，${material.link}。`,
+        `这提醒我们，成熟的判断从不只是顺着惯性做选择，而是能重新追问标准本身。`
       ].join(''),
       [
-        `因此，我的结论是：${key}是否成立取决于价值标准、现实代价与长期后果。`,
-        `当判断能够经受反问并指向实践时，才具有真正的解释力。`
+        `因此，${key}是否成立，取决于价值标准、现实代价与长期后果能否彼此印证。`,
+        `真正可靠的判断，不是最省力的判断，而是经得起反问、也经得起实践的判断。`
       ].join('')
     ];
   }
 
   return [
     [
-      `面对“${topic}”，若只追求迅速表态，论证往往停在直觉层面。`,
-      baseDefine,
-      `只有把概念放进现实过程里考察，我们才可能得到可检验的判断。`
+      `围绕“${topic}”的追问之所以值得认真对待，正在于它并不止于态度选择。`,
+      `${baseDefine}只有把概念放进现实过程里考察，我们才可能得到可检验的判断。`
     ].join(''),
     [
       `先看现实中的第一层图景：许多判断看起来“顺理成章”，其实只是经验惯性的结果。`,
       `例如，${material.example}。`,
-      `当我们把案例放进“前提—机制—结果”链条，就会发现，同一结论在不同条件下会出现差异。`,
-      `因此，论证不能只靠例子堆叠，而要解释“为什么这个例子支持你的判断”。`
+      `当案例被放进“前提—机制—结果”的链条中，同一结论在不同条件下往往会出现差异。`,
+      `也正因为如此，真正需要追问的不是现象本身，而是它何以成立。`
     ].join(''),
     [
       `诚然，强调${key}有其道理：它回应了现实中的某种真实需求，也能提供行动方向。`,
-      `然而，如果只强调这一端，忽视边界与副作用，结论就会迅速滑向片面。`,
-      `真正高质量的判断必须能处理反方质疑：在例外情形下，你的观点是否仍能自洽？`
+      `然而，如果只强调这一端，忽视边界与副作用，原本合理的判断也会迅速滑向片面。`,
+      `因此，任何结论都必须接受反问：在例外情形下，它是否仍能自洽？`
     ].join(''),
     [
-      `把视角拉回到当下社会，在信息高速流动的环境中，人们常被“更快表达”推动，却忽略“更慢思考”。`,
-      `因此高质量作文不只是“我认为”，更要写清“我为什么这样认为、在什么条件下这样认为”。`
+      `把视角拉回到当下社会，在信息高速流动的环境中，人们常被更快表达所推动，却忽略更慢思考的必要。`,
+      `越是在这样的时刻，越需要通过条件、机制与边界来稳住判断。`
     ].join(''),
     [
       `回到题目，我的结论是：${key}并非绝对成立，但在明确前提、补足机制、接受边界的情况下，具有解释力。`,
-      `当判断能够经受反问、能够回应现实、能够指向实践时，思辨才真正从纸面落到生活。`
+      `当判断能够回应现实、经受反问并指向实践时，思辨才真正从纸面落到生活。`
+    ].join('')
+  ];
+}
+
+function normalizeStructureStepText(text, fallback) {
+  const raw = String(text || '').trim();
+  if (!raw) return fallback;
+  return raw
+    .replace(/^(先|再|然后|进一步|最后|结尾|第一段|第二段|第三段|第四段|第一层|第二层|第三层)[：:、，\s]*/g, '')
+    .replace(/^写(出|清|明|下)?/g, '')
+    .trim() || fallback;
+}
+
+function buildEssayTemplateFromExample(topic, analysis, exampleCard, casePool) {
+  const material = (casePool === 'examplelib' || casePool === 'auto')
+    ? materialFromTrainingExampleCard(exampleCard)
+    : pickCaseMaterial(casePool, analysis.topicType?.code || 'phenomenon', topic);
+  const key = analysis.topicPhrases?.[0] || '该命题';
+  const structure = exampleCard?.structure || [];
+  const materials = dedupeArray([
+    ...(exampleCard?.materials || []),
+    material?.example ? `${material.domain}中的现实场景也能说明这一点：${material.example}` : ''
+  ]).filter(Boolean);
+  const golden = (exampleCard?.goldenSentences || []).filter(Boolean);
+  const introFocus = splitInsightBullets(exampleCard?.focus, 1)[0] || `讨论“${key}”时不能停在直觉表态。`;
+  const riskTip = splitInsightBullets(exampleCard?.risk, 1)[0] || '若忽视边界，结论就会滑向片面。';
+  const thesis = exampleCard?.thesis || analysis.thesis || `本文主张：${key}需要在条件与边界中判断。`;
+  const step1 = normalizeStructureStepText(structure[0], `解释“${key}”为何会成为争议中心`);
+  const step2 = normalizeStructureStepText(structure[1], '把另一端的限制、代价与边界补充出来');
+  const step3 = normalizeStructureStepText(structure[2], '把抽象命题落到现实结构与时代处境之中');
+
+  return [
+    [
+      `围绕“${topic}”的讨论，表面上是在判断一种说法是否成立，实则是在辨认某种关系应当如何被理解。`,
+      `${introFocus}。`,
+      thesis
+    ].join(''),
+    [
+      `先看第一层：${step1}。`,
+      `${materials[0] || `例如，${material.example}。`}`,
+      `这说明，讨论“${key}”时不能停在态度判断，而必须先交代其成立的现实基础。`
+    ].join(''),
+    [
+      `进一步看，${step2}。`,
+      `${materials[1] || golden[0] || '现实中的复杂性，恰恰要求我们给出机制解释，而不是只堆态度。'}。`,
+      `${golden[0] || '只有把现象放回结构与因果链里，判断才不会浮在表面。'}`
+    ].join(''),
+    [
+      `当然，若把上述判断推向绝对，原本有解释力的立场也会迅速失真。`,
+      `${riskTip}。`,
+      `${golden[1] || '因此，结论必须补出边界、前提与例外，而不是把一时立场写成永久真理。'}`
+    ].join(''),
+    [
+      `把视角拉回当下社会，${step3}。`,
+      `从${material.domain}的现实场景看，${material.link}。`,
+      `${materials[2] || '也正是在这里，抽象命题才真正与时代处境发生了联系。'}`
+    ].join(''),
+    [
+      `回到题目，我的结论是：${thesis}`,
+      `${golden[2] || golden[golden.length - 1] || '当判断能够回应现实、承认边界并指向实践时，思辨才真正具有力量。'}`
     ].join('')
   ];
 }
@@ -1857,6 +1970,66 @@ function pickExampleTrainingCardForTopic(topic, topicType) {
   return pickRelevantExampleCards(topic, topicType, 1)[0] || null;
 }
 
+function pickAnchoredExampleCards(topic, topicType, limit = 2) {
+  const text = String(topic || '');
+  return pickRelevantExampleCards(text, topicType, Math.max(limit + 2, 4))
+    .filter((card) => {
+      const keywordHits = (card.keywords || []).filter((kw) => kw && text.includes(kw)).length;
+      return card.matchScore >= 22 || keywordHits >= 2 || (card.topic && text.includes(card.topic.slice(0, 10)));
+    })
+    .slice(0, limit);
+}
+
+function pickAnchoredExampleCardForTopic(topic, topicType) {
+  return pickAnchoredExampleCards(topic, topicType, 1)[0] || null;
+}
+
+function splitInsightBullets(text, limit = 3) {
+  return String(text || '')
+    .split(/[；。]/)
+    .map((x) => x.trim())
+    .filter((x) => x.length >= 6)
+    .slice(0, limit);
+}
+
+function buildExampleGuidedKit(topic, topicType, topicPhrases) {
+  const anchors = pickAnchoredExampleCards(topic, topicType, 2);
+  if (!anchors.length) return null;
+  const anchor = anchors[0];
+  const companion = anchors[1] || null;
+  const thesis = anchor.thesis || '';
+  const structure = (anchor.structure || []).slice(0, 3).map((item, index) => `${['第一段', '第二段', '第三段'][index] || `第${index + 1}段`}：${item}`);
+  const pitfalls = dedupeArray([
+    ...splitInsightBullets(anchor.risk, 2),
+    ...splitInsightBullets(anchor.focus, 1).map((x) => `不要忽视：${x}`)
+  ]).slice(0, 4);
+  const intent = dedupeArray([
+    `这道题最像范例库中的“${anchor.title}”，高分抓手是：${anchor.focus || '先界定概念，再写条件与边界。'}`,
+    anchor.intent || '',
+    companion ? `若想再补一层，可以参考“${companion.title}”：${companion.focus || companion.intent || ''}` : ''
+  ]).filter(Boolean).slice(0, 3);
+  const mustAnswers = dedupeArray([
+    `你是否抓住了这道题真正要处理的难点：${anchor.focus || '先定义核心概念，再进入论证'}`,
+    thesis ? `你的中心论点是否提升到这一层：${thesis}` : '',
+    anchor.risk ? `你是否提前规避了常见失误：${anchor.risk}` : ''
+  ]).filter(Boolean).slice(0, 4);
+  const generatorHints = dedupeArray([
+    `生成时优先沿用“${anchor.title}”的结构节奏，不要一上来就空泛表态。`,
+    (anchor.materials || [])[0] ? `正文可优先转写这条现实支点：${anchor.materials[0]}` : '',
+    (anchor.goldenSentences || [])[0] ? `结尾可借这类收束方式：${anchor.goldenSentences[0]}` : ''
+  ]).filter(Boolean).slice(0, 3);
+  return {
+    anchorCard: anchor,
+    companionCard: companion,
+    thesis,
+    structure,
+    pitfalls,
+    intent,
+    mustAnswers,
+    generatorHints
+  };
+}
+
 function convertExampleTrainingCardToMaterialCard(card) {
   return {
     id: `example-${card.id}`,
@@ -2043,13 +2216,17 @@ function generateFullEssayDraft(topic, analysis, minWords = 800, maxWords = 850,
   const key = analysis.topicPhrases?.[0] || '该命题';
   const key2 = analysis.topicPhrases?.[1] || '另一端';
   const topicType = analysis.topicType?.code || 'phenomenon';
+  const exampleCard = analysis.exampleGuidedKit?.anchorCard
+    || ((opts.casePool === 'examplelib' || opts.casePool === 'auto') ? pickAnchoredExampleCardForTopic(topic, analysis.topicType) : null);
   if (isExpoThemeTopic(topic)) {
     return normalizeEssayLength(buildExpoThemeEssay(topic).join('\n\n'), minWords, maxWords, topic, '世博会主题', '城市文明', 'expo');
   }
-  const template = buildEssayTemplateByType(topic, key, key2, topicType, opts.casePool || 'auto');
+  const template = exampleCard
+    ? buildEssayTemplateFromExample(topic, analysis, exampleCard, opts.casePool || 'auto')
+    : buildEssayTemplateByType(topic, key, key2, topicType, opts.casePool || 'auto');
   let essay = template.join('\n\n');
   essay = applyTriadEnhancement(essay, analysis);
-  essay = normalizeEssayLength(essay, minWords, maxWords, topic, key, key2, topicType);
+  essay = normalizeEssayLength(essay, minWords, maxWords, topic, key, key2, topicType, { exampleCard });
   return essay;
 }
 
@@ -2092,9 +2269,9 @@ function buildExpoThemeEssay() {
   ];
 }
 
-function normalizeEssayLength(text, minWords, maxWords, topic, key, key2, topicType) {
+function normalizeEssayLength(text, minWords, maxWords, topic, key, key2, topicType, opts = {}) {
   let draft = String(text || '');
-  const expansionPool = buildEssayExpansionPool(topic, key, key2, topicType);
+  const expansionPool = buildEssayExpansionPool(topic, key, key2, topicType, opts.exampleCard, opts.tier || 'high');
   let expansionIndex = 0;
 
   while (countWords(draft) < minWords && expansionIndex < expansionPool.length) {
@@ -2128,7 +2305,7 @@ function normalizeEssayLength(text, minWords, maxWords, topic, key, key2, topicT
     draft = out.join('\n\n');
   }
 
-  const tailPool = buildEssayTailPool(topic, key, key2, topicType);
+  const tailPool = buildEssayTailPool(topic, key, key2, topicType, opts.exampleCard, opts.tier || 'high');
   let guard = 0;
   while (countWords(draft) < minWords && guard < tailPool.length) {
     const next = tailPool[guard];
@@ -2142,37 +2319,77 @@ function normalizeEssayLength(text, minWords, maxWords, topic, key, key2, topicT
   return draft;
 }
 
-function buildEssayExpansionPool(topic, key, key2, topicType) {
+function buildEssayExpansionPool(topic, key, key2, topicType, exampleCard, tier = 'high') {
   if (topicType === 'expo') {
     return [
       '更进一步看，世博会的价值还在于给普通人一次想象未来的机会。宏大的国家叙事最终要落回日常生活：一条更安全的街道、一片更亲近的绿地、一种更便利的公共服务，都会让城市文明变得具体。',
       '因此，主题设计不能只求响亮，更要能组织展览内容、引导公众参与，并留下可持续的城市行动。'
     ];
   }
-  return [
+  if (tier === 'basic') {
+    return [
+      `再往下想一步，“${key}”之所以难写，正因为它在现实中并不是非黑即白。`,
+      '许多看起来简单的判断，一旦放进不同情境中，就会出现新的变化。',
+      '因此，哪怕只是基础写法，也应尽量把“为什么会这样”说清楚一些。'
+    ];
+  }
+  if (tier === 'mid') {
+    return [
+      `进一步说，“${key}”之所以值得讨论，正因为它并不只对应一种固定答案。`,
+      topicType === 'relation'
+        ? `若不把“${key}”与“${key2}”放到同一处境中衡量，文章就容易显得一边倒。`
+        : '若不补出前提与情境，同一个判断在不同处境下就可能失去解释力。',
+      '也正因如此，中上档作文往往要比基础作文多写一步：多写机制，多写边界。'
+    ];
+  }
+  const generic = [
     `进一步而言，“${key}”不是孤立标签，而应放进具体场景中理解。它在一种条件下可能指向进步，在另一种条件下也可能暴露局限。`,
     topicType === 'relation'
       ? `若忽视“${key}”与“${key2}”的双向作用，文章就容易滑向单边判断；只有写清二者如何互相制约，论证才有弹性。`
-      : `若忽视前提差异，同一个判断在不同场景下可能产生不同后果，所以文章必须补出机制，而不是只给态度。`,
+      : `若忽视前提差异，同一个判断在不同场景下可能产生不同后果，因此机制与条件都不能省略。`,
     `现实生活中，真正可靠的判断往往不是最响亮的判断，而是能说明标准、承认例外、回应问题的判断。`
   ];
+  if (!exampleCard) return generic;
+  return dedupeArray([
+    ...((exampleCard.materials || []).map((x) => `换个角度看，${x}`)),
+    exampleCard.risk ? `也要警惕：${exampleCard.risk}` : '',
+    ...generic
+  ]).filter(Boolean);
 }
 
-function buildEssayTailPool(topic, key, key2, topicType) {
+function buildEssayTailPool(topic, key, key2, topicType, exampleCard, tier = 'high') {
   if (topicType === 'expo') {
     return [
       '由此可见，一个好的世博主题应当同时具备方向感、包容性与可操作性。它既能概括时代问题，又能转化为展馆内容和公共行动。',
       '这样的主题，才不会停留在宣传语上，而会成为城市面向未来的一次认真回答。'
     ];
   }
-  return [
+  if (tier === 'basic') {
+    return [
+      `总的来说，围绕“${key}”作判断，既不能只看一面，也不能急着下绝对结论。`,
+      '把理由说得更清楚一点，文章就会比单纯表态更稳。'
+    ];
+  }
+  if (tier === 'mid') {
+    return [
+      `由此可见，围绕“${key}”展开论证，真正重要的是把立场、理由与边界连起来。`,
+      '当结论既能回应现实，又保留分寸时，文章才更接近高一档的水平。'
+    ];
+  }
+  const generic = [
     `由此可见，围绕“${key}”展开论证，关键不是重复题目，而是把判断落实到条件、机制和后果之中。`,
     `只有这样，文章才能既回应题目，又避免空泛；既有立场，又有分寸。`
   ];
+  if (!exampleCard) return generic;
+  return dedupeArray([
+    exampleCard.thesis ? `归根到底，${exampleCard.thesis}` : '',
+    (exampleCard.goldenSentences || []).slice(0, 1).map((x) => `进一步说，${x}`)[0] || '',
+    ...generic
+  ]).filter(Boolean);
 }
 
 function renderGeneratedEssayReport(payload, container) {
-  const { topic, draft, wordCount, score, offTopic } = payload;
+  const { topic, draft, wordCount, score, offTopic, exampleAnchorTitle } = payload;
   const paraCount = splitParagraphs(draft).length;
   container.innerHTML = `
     <div class="agent-result-head">
@@ -2193,7 +2410,309 @@ function renderGeneratedEssayReport(payload, container) {
         <li>如需进一步提分，可点击“按提分动作一键改写”。</li>
       </ul>
       <p>题目：${escapeHtml(topic)}</p>
+      ${exampleAnchorTitle ? `<p>本次已调用范例母题：${escapeHtml(exampleAnchorTitle)}</p>` : ''}
     </div>
+  `;
+}
+
+function buildTierEssayContext(topic, analysis, casePool) {
+  const exampleCard = analysis.exampleGuidedKit?.anchorCard
+    || ((casePool === 'examplelib' || casePool === 'auto') ? pickAnchoredExampleCardForTopic(topic, analysis.topicType) : null);
+  const material = exampleCard && (casePool === 'examplelib' || casePool === 'auto')
+    ? materialFromTrainingExampleCard(exampleCard)
+    : pickCaseMaterial(casePool, analysis.topicType?.code || 'phenomenon', topic);
+  const key = analysis.topicPhrases?.[0] || '该命题';
+  const key2 = analysis.topicPhrases?.[1] || '另一端';
+  const thesis = exampleCard?.thesis || analysis.thesis || `本文主张：${key}需要在条件与边界中判断。`;
+  const plainThesis = String(thesis).replace(/^本文主张[:：]\s*/, '').trim();
+  const golden = (exampleCard?.goldenSentences || []).filter(Boolean);
+  const materials = dedupeArray([
+    ...(exampleCard?.materials || []),
+    material?.example ? `${material.domain}中的现实场景也说明了这一点：${material.example}` : ''
+  ]).filter(Boolean);
+  const structure = exampleCard?.structure || analysis.outline || [];
+  const riskTip = splitInsightBullets(exampleCard?.risk, 1)[0] || '若忽视边界，结论就容易失真。';
+  return {
+    exampleCard,
+    material,
+    key,
+    key2,
+    thesis,
+    plainThesis,
+    golden,
+    materials,
+    structure,
+    riskTip
+  };
+}
+
+function buildMidTierEssayDraft(topic, analysis, casePool) {
+  const ctx = buildTierEssayContext(topic, analysis, casePool);
+  const step1 = normalizeStructureStepText(ctx.structure[0], `解释“${ctx.key}”为何会成为争议中心`);
+  const step2 = normalizeStructureStepText(ctx.structure[1], '补出另一端的限制与代价');
+  const step3 = normalizeStructureStepText(ctx.structure[2], '把判断放回现实情境');
+  const paragraphs = [
+    [
+      `面对“${topic}”，与其急于表明态度，不如先追问“${ctx.key}”为何会引发争议。`,
+      `我认为，${ctx.plainThesis || ctx.thesis}`
+    ].join(''),
+    [
+      `先看题目的第一层：${step1}。`,
+      `${ctx.materials[0] || `例如，${ctx.material.example}。`}`,
+      `由此可见，${ctx.key}并非凭空提出，而是与现实中的某种需要有关。`
+    ].join(''),
+    [
+      `但问题并不止于此。${step2}。`,
+      `${ctx.materials[1] || ctx.golden[0] || '如果只顺着单一方向往前推，原本合理的判断也可能失去弹性。'}。`,
+      `因此，讨论这道题时还应看到边界、条件与可能的副作用。`
+    ].join(''),
+    [
+      `再把目光放回现实，${step3}。`,
+      `尤其在${ctx.material.domain}场景中，${ctx.material.link}。`,
+      `现实越复杂，越需要在两端之间保持较为稳妥的判断。`
+    ].join(''),
+    [
+      `总之，我认为：${ctx.plainThesis || ctx.thesis}`,
+      `${ctx.golden[1] || '只有把立场放进现实与边界中理解，文章才不至于流于片面。'}`
+    ].join('')
+  ];
+  return normalizeEssayLength(paragraphs.join('\n\n'), 800, 840, topic, ctx.key, ctx.key2, analysis.topicType?.code || 'phenomenon', {
+    exampleCard: ctx.exampleCard,
+    tier: 'mid'
+  });
+}
+
+function buildBasicTierEssayDraft(topic, analysis, casePool) {
+  const ctx = buildTierEssayContext(topic, analysis, casePool);
+  const paragraphs = [
+    [
+      `对于“${topic}”，我认为不能简单地全部肯定，也不能完全否定。`,
+      `${ctx.key}之所以会被不断讨论，说明它和现实生活确实有关。`
+    ].join(''),
+    [
+      `很多时候，人们之所以会支持这一点，是因为它确实能解决一些实际问题。`,
+      `${ctx.materials[0] || `例如，${ctx.material.example}。`}`,
+      `所以从这个角度看，它当然有一定道理。`
+    ].join(''),
+    [
+      `不过，如果只看到它的好处，也容易忽视别的问题。`,
+      `${ctx.riskTip}。`,
+      `这说明看问题还是要全面一些，不能只抓住一面不放。`
+    ].join(''),
+    [
+      `联系现实生活，这样的情况并不少见。`,
+      `很多人往往会根据眼前效果作判断，却忽略了更长远的影响。`,
+      `因此，我们在面对类似问题时，还应该多想一步。`
+    ].join(''),
+    [
+      `总之，我认为这道题提醒我们：判断一件事，既要看到它存在的理由，也要看到它可能带来的限制。`,
+      `只有这样，得出的结论才会比较稳妥。`
+    ].join('')
+  ];
+  return normalizeEssayLength(paragraphs.join('\n\n'), 800, 830, topic, ctx.key, ctx.key2, analysis.topicType?.code || 'phenomenon', {
+    exampleCard: ctx.exampleCard,
+    tier: 'basic'
+  });
+}
+
+function buildTierPedagogy(level, analysis, exampleCard) {
+  const key = analysis.topicPhrases?.[0] || '题眼';
+  const exampleName = exampleCard?.title || '当前母题';
+  if (level === 'high') {
+    return {
+      why: '这一档的优势在于：开头定题快，中段有机制链，能处理反方与边界，结尾还能回到现实与价值收束。',
+      gap: '它和56+最大的差距，不在辞藻，而在“概念界定是否准确、段落之间是否形成推进、边界意识是否清楚”。',
+      upgrade: `继续保持“${exampleName}”这类写法：先定概念，再补机制，再收边界。`
+    };
+  }
+  if (level === 'mid') {
+    return {
+      why: '这一档通常已经切题，也有完整结构，但机制分析还不够深，现实落点和结尾收束略显普通。',
+      gap: `它比63+少的，往往是围绕“${key}”继续深挖一层的能力：为什么成立、何时失效、怎样回应反方。`,
+      upgrade: '想冲到63+，最有效的动作是：每段补一句机制解释，结尾补一句边界判断。'
+    };
+  }
+  return {
+    why: '这一档通常能大体扣题，也像一篇完整文章，但概念较模糊，论证容易停在“有道理/也有问题”的平面上。',
+    gap: `它和56+的差距，主要不在语言，而在是否真正围绕“${key}”展开，而不是泛泛谈人生道理。`,
+    upgrade: '想先升到56+，优先补三件事：开头定义题眼、主体段补例后分析、结尾加条件化结论。'
+  };
+}
+
+function inspectTierParagraphSignals(paragraph, analysis, index, total) {
+  const text = String(paragraph || '');
+  const topicPhrases = analysis.topicPhrases || [];
+  const topicType = analysis.topicType || { code: 'phenomenon' };
+  return {
+    text,
+    index,
+    total,
+    sentences: splitSentences(text),
+    topicHits: topicPhrases.filter((k) => k && text.includes(k)).length,
+    hasDefinition: /(所谓|不是.*而是|并非.*而是|指的是|内涵)/.test(text),
+    hasMechanism: /(因为|所以|因此|由此|机制|本质|意味着|从而)/.test(text),
+    hasTransition: /(诚然|然而|另一方面|不过|同时|反过来|进一步看)/.test(text),
+    hasReality: /(现实|社会|时代|校园|平台|技术|教育|生活|AI|人工智能|城市)/.test(text),
+    hasBoundary: /(前提|条件|边界|未必|并不总是|如果|当.*时)/.test(text),
+    hasExample: /(例如|比如|以.*为例|从.*到|案例|现实中)/.test(text),
+    topicTypeCode: topicType.code || 'phenomenon'
+  };
+}
+
+function buildTierParagraphAnnotation(level, signals, advice, referenceSignals) {
+  const isOpening = signals.index === 0;
+  const isClosing = signals.index === signals.total - 1;
+  const missing = [];
+  if (isOpening && !signals.hasDefinition) missing.push('缺少题眼定义');
+  if (!isOpening && !signals.hasMechanism) missing.push('例后缺机制解释');
+  if (signals.topicTypeCode === 'relation' && !isOpening && !signals.hasTransition) missing.push('缺辩证转折');
+  if (!isOpening && !signals.hasReality) missing.push('现实锚点偏弱');
+  if (isClosing && !signals.hasBoundary) missing.push('结尾缺边界');
+  if (!signals.topicHits) missing.push('回扣题眼不够');
+
+  const compareParts = [];
+  if (referenceSignals) {
+    if (referenceSignals.hasDefinition && !signals.hasDefinition) compareParts.push('对照高一档，这一段多了概念界定，所以开篇更稳。');
+    if (referenceSignals.hasMechanism && !signals.hasMechanism) compareParts.push('对照高一档，这一段多了一句机制解释，所以例子真正转成了论证。');
+    if (referenceSignals.hasTransition && !signals.hasTransition) compareParts.push('对照高一档，这一段补了转折，论证就不再是一边倒。');
+    if (referenceSignals.hasReality && !signals.hasReality) compareParts.push('对照高一档，这一段把命题拉回现实场景，因此更有落地感。');
+    if (referenceSignals.hasBoundary && !signals.hasBoundary) compareParts.push('对照高一档，这一段多了边界句，所以收束更稳、更像上海卷一类文。');
+  }
+
+  if (level === 'high') {
+    const why = isOpening
+      ? (signals.hasDefinition ? '这一段能拉分，因为开头没有空喊观点，而是先界定概念、再亮中心论点。' : '这一段能稳住分数，因为能较快切题并建立论证方向。')
+      : (isClosing
+        ? (signals.hasBoundary ? '这一段能拉分，因为结尾不是口号式收束，而是补了边界与现实指向。' : '这一段的优势在于能回扣题目并完成收束。')
+        : (signals.hasMechanism ? '这一段能拉分，因为不只举例，还把例子拉回机制链条。' : '这一段的优势在于已经有论证推进，不停在态度表态。'));
+    const compare = compareParts[0] || '和中档相比，这一段更清楚地完成了“定义—分析—收束”中的关键动作。';
+    const action = '保持这个段落节奏：先回扣题眼，再补机制或边界，不让段落散掉。';
+    return { title: '本段拉分点', why, compare, action };
+  }
+
+  if (level === 'mid') {
+    const why = isOpening
+      ? (signals.hasDefinition ? '这一段已经切题，也开始处理题眼，但概念边界还不够锋利。' : '这一段能进入 56+，是因为至少回应了题目；但它还停在表态层，没完全把题眼讲透。')
+      : (isClosing
+        ? (signals.hasBoundary ? '这一段已经有基本收束，但升华和现实指向还略显普通。' : '这一段能收住文章，但边界意识还不够明显，所以难以上到 63+。')
+        : (signals.hasMechanism ? '这一段已经开始分析原因，不再只是摆例子。' : '这一段有材料也有观点，但“为什么”还没深挖，所以通常停在 56+附近。'));
+    const compare = compareParts[0] || '和 63+ 相比，这一段还少一层：要么少机制，要么少边界，要么少现实锚点。';
+    const action = `升到 63+ 最该补的一刀：${missing[0] || '把这一段再往“机制+边界”深挖一步'}。`;
+    return { title: '本段为什么停在56+', why, compare, action };
+  }
+
+  const why = isOpening
+    ? (signals.hasDefinition ? '这一段基本能起笔，但概念界定还比较粗，中心论点也不够稳。' : '这一段之所以只能到 48 左右，关键是开头先表态、后定义，容易显得切题不深。')
+    : (isClosing
+      ? (signals.hasBoundary ? '这一段已经能回扣题目，但结尾的力度和格局还不够。' : '这一段之所以只到 48，往往是因为结尾只有稳妥表态，没有边界和升华。')
+      : (signals.hasMechanism ? '这一段已经不只是讲例子，但分析还比较浅。' : '这一段之所以只到 48，主要是例子摆出来了，却没有解释它为什么能证明观点。'));
+  const compare = compareParts[0] || '和 56+ 相比，这一段通常还缺少一个关键动作：定义、机制、转折或边界。';
+  const action = `先别求写漂亮，先补齐：${missing[0] || '回扣题眼并补一句机制解释'}。`;
+  return { title: '本段为什么只到48+', why, compare, action };
+}
+
+function buildTierParagraphNotes(item, referenceItem, analysis) {
+  const paragraphs = splitParagraphs(item.draft);
+  const refParagraphs = splitParagraphs(referenceItem?.draft || '');
+  const adviceList = item.score?.offTopic?.paragraphAdvice || [];
+  return paragraphs.map((paragraph, index) => {
+    const signals = inspectTierParagraphSignals(paragraph, analysis, index, paragraphs.length);
+    const referenceSignals = refParagraphs[index]
+      ? inspectTierParagraphSignals(refParagraphs[index], analysis, index, refParagraphs.length)
+      : null;
+    const advice = adviceList[index] || null;
+    return {
+      index,
+      paragraph,
+      note: buildTierParagraphAnnotation(item.level, signals, advice, referenceSignals),
+      score: advice?.score ?? item.score?.offTopic?.paragraphDiagnostics?.[index]?.semanticScore ?? null
+    };
+  });
+}
+
+function generateTieredEssaySet(topic, analysis, opts = {}) {
+  const casePool = opts.casePool || 'auto';
+  const highDraft = generateFullEssayDraft(topic, analysis, 800, 850, { casePool });
+  const midDraft = buildMidTierEssayDraft(topic, analysis, casePool);
+  const basicDraft = buildBasicTierEssayDraft(topic, analysis, casePool);
+  const exampleCard = analysis.exampleGuidedKit?.anchorCard || null;
+  const items = [
+    { level: 'high', bandLabel: '63+ 一类卷', title: '高分示范版', draft: highDraft },
+    { level: 'mid', bandLabel: '56+ 二类卷上段', title: '中上可提升版', draft: midDraft },
+    { level: 'basic', bandLabel: '48+ 二类卷中段', title: '基础合格版', draft: basicDraft }
+  ];
+  const scoredItems = items.map((item) => {
+    const score = scoreEssayDraft(topic, item.draft);
+    return {
+      ...item,
+      score,
+      wordCount: countWords(item.draft),
+      pedagogy: buildTierPedagogy(item.level, analysis, exampleCard)
+    };
+  });
+  const highItem = scoredItems.find((x) => x.level === 'high');
+  const midItem = scoredItems.find((x) => x.level === 'mid');
+  return scoredItems.map((item) => ({
+    ...item,
+    paragraphNotes: buildTierParagraphNotes(
+      item,
+      item.level === 'basic' ? midItem : (item.level === 'mid' ? highItem : midItem),
+      analysis
+    )
+  }));
+}
+
+function renderTieredEssayReport(payload, container) {
+  const { topic, tiers } = payload;
+  const rows = (tiers || []).map((item, index) => `
+    <details class="tier-essay-card" ${index === 0 ? 'open' : ''}>
+      <summary class="tier-essay-summary">
+        <span>${escapeHtml(item.bandLabel)}｜${escapeHtml(item.title)}</span>
+        <strong>参考估分 ${item.score?.score70 || '--'}/70</strong>
+      </summary>
+      <div class="tier-essay-meta">
+        <p><strong>这一档为什么能到这里</strong>：${escapeHtml(item.pedagogy?.why || '')}</p>
+        <p><strong>和上一档/下一档差在哪</strong>：${escapeHtml(item.pedagogy?.gap || '')}</p>
+        <p><strong>往上一档怎么改</strong>：${escapeHtml(item.pedagogy?.upgrade || '')}</p>
+        <div class="agent-tags">
+          <span class="agent-tag">字数：${item.wordCount}</span>
+          <span class="agent-tag">${escapeHtml(item.score?.level || '待评估')}</span>
+        </div>
+        <div class="agent-actions secondary">
+          <button class="agent-btn ghost tier-essay-load-btn" type="button" data-tier-index="${index}">加载到草稿框</button>
+        </div>
+      </div>
+      <div class="tier-essay-annotated">
+        ${(item.paragraphNotes || []).map((row) => `
+          <div class="tier-essay-paragraph-row">
+            <div class="tier-essay-body">
+              <div class="tier-essay-paragraph-label">第${row.index + 1}段${row.score != null ? `｜贴题 ${row.score}/100` : ''}</div>
+              ${escapeHtml(row.paragraph).replace(/\n/g, '<br/>')}
+            </div>
+            <div class="tier-essay-note ${escapeHtml(item.level)}">
+              <strong>${escapeHtml(row.note?.title || '本段提示')}</strong>
+              <p>${escapeHtml(row.note?.why || '')}</p>
+              <p>${escapeHtml(row.note?.compare || '')}</p>
+              <p><strong>升档动作</strong>：${escapeHtml(row.note?.action || '')}</p>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    </details>
+  `).join('');
+
+  container.innerHTML = `
+    <div class="agent-result-head">
+      <h3>同题三档范文对照</h3>
+      <div class="agent-tags">
+        <span class="agent-tag">题目：${escapeHtml(topic)}</span>
+        <span class="agent-tag">用途：看懂分差</span>
+      </div>
+    </div>
+    <div class="agent-result-block">
+      <p>同一道题分别给出 <strong>63+</strong>、<strong>56+</strong>、<strong>48+</strong> 三档写法，并做成逐段侧注版。重点不是背哪篇，而是看清差距到底出在概念界定、机制分析、边界意识还是语言收束。</p>
+    </div>
+    <div class="score-grid">${rows}</div>
   `;
 }
 
@@ -2774,6 +3293,7 @@ function runBaselineHealthCheck() {
     'essayDraftInput',
     'analyzeTopicBtn',
     'generateFullEssayBtn',
+    'generateTieredEssayBtn',
     'offTopicCheckBtn',
     'scoreDraftBtn',
     'improveDraftBtn',
@@ -3035,6 +3555,16 @@ function runRegressionSuite() {
   }
 
   try {
+    const topic = '对已有知识的综合，是创新吗？';
+    const analysis = analyzeEssayTopic(topic);
+    const ok = /综合已有知识|拼接不是创新/.test(analysis.exampleGuidedKit?.anchorCard?.title || '')
+      && /综合过程|综合未必/.test(analysis.thesis || '');
+    cases.push({ name: '范例驱动题目解读', ok, detail: ok ? '分析已命中创新母题并提升中心立意' : '分析未正确吃到范例母题' });
+  } catch (err) {
+    cases.push({ name: '范例驱动题目解读', ok: false, detail: `异常：${err?.message || '未知错误'}` });
+  }
+
+  try {
     const topic = '请写一篇文章，谈谈你对“简即为美”这个观点的认识与思考。';
     const analysis = analyzeEssayTopic(topic);
     const essay = generateFullEssayDraft(topic, analysis, 800, 850, { casePool: 'examplelib' });
@@ -3042,6 +3572,34 @@ function runRegressionSuite() {
     cases.push({ name: '上海范例库接入生成', ok, detail: ok ? '范例库素材可参与生成' : '生成结果未体现范例库特征' });
   } catch (err) {
     cases.push({ name: '上海范例库接入生成', ok: false, detail: `异常：${err?.message || '未知错误'}` });
+  }
+
+  try {
+    const topic = '对已有知识的综合，是创新吗？';
+    const analysis = analyzeEssayTopic(topic);
+    const essay = generateFullEssayDraft(topic, analysis, 800, 850, { casePool: 'examplelib' });
+    const paraCount = splitParagraphs(essay).length;
+    const metaCount = countMatches(essay, /高质量作文|写作不能|文章必须|只凭第一反应迅速站队|面对“.*?”，若只|从备考角度看/g);
+    const ok = /机械拼接|生成式|解释力|结构/.test(essay)
+      && countWords(essay) >= 800
+      && countWords(essay) <= 850
+      && paraCount >= 5
+      && metaCount === 0;
+    cases.push({ name: '范例驱动完整范文', ok, detail: ok ? `已写出创新题专属骨架，${paraCount}段，字数 ${countWords(essay)}` : `创新题生成仍偏模板化，${paraCount}段，字数 ${countWords(essay)}` });
+  } catch (err) {
+    cases.push({ name: '范例驱动完整范文', ok: false, detail: `异常：${err?.message || '未知错误'}` });
+  }
+
+  try {
+    const topic = '生活中，人们往往用常识去看待事物，做出判断。对此，你怎么看？';
+    const analysis = analyzeEssayTopic(topic);
+    const tiers = generateTieredEssaySet(topic, analysis, { casePool: 'examplelib' });
+    const wordOk = tiers.every((x) => x.wordCount >= 800 && x.wordCount <= 850);
+    const countOk = tiers.length === 3;
+    const orderOk = tiers[0].score.total >= tiers[1].score.total && tiers[1].score.total >= tiers[2].score.total;
+    cases.push({ name: '同题三档范文', ok: countOk && wordOk && orderOk, detail: countOk ? `三档已生成，估分序列 ${tiers.map((x) => x.score.score70).join(' / ')}` : '三档生成数量异常' });
+  } catch (err) {
+    cases.push({ name: '同题三档范文', ok: false, detail: `异常：${err?.message || '未知错误'}` });
   }
 
   try {
