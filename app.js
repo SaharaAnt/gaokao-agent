@@ -6,6 +6,19 @@ const PATH_TRAINING_STORAGE_KEY = 'gaokao_path_training_v1';
 const ERROR_BOOK_STORAGE_KEY = 'gaokao_error_book_v1';
 const MATERIAL_CARD_STORAGE_KEY = 'gaokao_material_cards_v1';
 const TRAINING_SESSION_LIMIT = 120;
+const HANDWRITING_OCR_CDN = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
+const HANDWRITING_ANALYSIS_MAX_WIDTH = 420;
+const HANDWRITING_OCR_MAX_WIDTH = 1600;
+const HANDWRITING_SCAN_STATE = {
+  pages: [],
+  cacheKey: '',
+  ocrResult: null,
+  metricsResult: null,
+  status: 'idle',
+  error: ''
+};
+
+let handwritingOcrScriptPromise = null;
 
 const TIMELINE_SCORE_GUIDE = {
   '2025': '重点看“概念链条完整度”：是否同时处理“专-转-传”，并对“必定”给出条件判断。',
@@ -180,6 +193,369 @@ document.addEventListener('DOMContentLoaded', () => {
 
 function safeInit(fn) { try { fn(); } catch (_) {} }
 
+function updateHandwritingUi(status, message) {
+  const badge = document.getElementById('handwritingStatusBadge');
+  const statusEl = document.getElementById('handwritingOcrStatus');
+  const tone = status || 'ready';
+  if (badge) {
+    badge.className = `handwriting-status-badge ${tone}`;
+    badge.textContent = tone === 'loading'
+      ? '识别中'
+      : tone === 'done'
+        ? '已识别'
+        : tone === 'error'
+          ? '识别失败'
+          : HANDWRITING_SCAN_STATE.pages.length
+            ? '已上传'
+            : '未上传';
+  }
+  if (statusEl) {
+    statusEl.className = `handwriting-ocr-status ${tone}`;
+    statusEl.textContent = message || (HANDWRITING_SCAN_STATE.pages.length ? '已上传手写图片，评分时会自动OCR识别。' : '未上传手写图片时，书写项暂按中档估计。');
+  }
+}
+
+function renderHandwritingPreviewList() {
+  const preview = document.getElementById('handwritingPreviewList');
+  if (!preview) return;
+  if (!HANDWRITING_SCAN_STATE.pages.length) {
+    preview.innerHTML = '<div class="handwriting-empty">暂未上传图片</div>';
+    return;
+  }
+  preview.innerHTML = HANDWRITING_SCAN_STATE.pages.map((page, index) => `
+    <div class="handwriting-preview-card">
+      <img src="${page.dataUrl}" alt="手写作文第${index + 1}页预览" />
+      <div class="handwriting-preview-meta">
+        <strong>第${index + 1}页</strong><br />
+        ${escapeHtml(page.name)}<br />
+        ${escapeHtml(formatFileSize(page.size))}
+      </div>
+    </div>
+  `).join('');
+}
+
+function formatFileSize(size) {
+  if (!size || Number.isNaN(size)) return '大小未知';
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function resetHandwritingScanCache() {
+  HANDWRITING_SCAN_STATE.ocrResult = null;
+  HANDWRITING_SCAN_STATE.metricsResult = null;
+  HANDWRITING_SCAN_STATE.error = '';
+}
+
+function clearHandwritingUpload(inputEl) {
+  HANDWRITING_SCAN_STATE.pages = [];
+  HANDWRITING_SCAN_STATE.cacheKey = '';
+  HANDWRITING_SCAN_STATE.status = 'idle';
+  resetHandwritingScanCache();
+  if (inputEl) inputEl.value = '';
+  renderHandwritingPreviewList();
+  updateHandwritingUi('ready', '未上传手写图片时，书写项暂按中档估计。');
+}
+
+async function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(reader.error || new Error('读取图片失败'));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function handleHandwritingFiles(fileList) {
+  const files = Array.from(fileList || []).filter((file) => /^image\//.test(file.type || ''));
+  if (!files.length) {
+    clearHandwritingUpload(document.getElementById('handwritingImageInput'));
+    return;
+  }
+  updateHandwritingUi('loading', '正在读取手写图片...');
+  const pages = [];
+  for (const file of files.slice(0, 4)) {
+    const dataUrl = await readFileAsDataUrl(file);
+    pages.push({
+      name: file.name,
+      size: file.size,
+      lastModified: file.lastModified || 0,
+      type: file.type || '',
+      dataUrl
+    });
+  }
+  HANDWRITING_SCAN_STATE.pages = pages;
+  HANDWRITING_SCAN_STATE.cacheKey = pages.map((page) => `${page.name}-${page.size}-${page.lastModified}`).join('|');
+  HANDWRITING_SCAN_STATE.status = 'ready';
+  resetHandwritingScanCache();
+  renderHandwritingPreviewList();
+  updateHandwritingUi('ready', `已上传${pages.length}页手写图片，点击“草稿评分”或“习作精批”时会自动识别。`);
+}
+
+function normalizeForOcrCompare(text) {
+  return String(text || '')
+    .replace(/\s+/g, '')
+    .replace(/[，。！？；：“”‘’、,.!?;:'"()\[\]（）【】]/g, '')
+    .toLowerCase();
+}
+
+function calculateTextOverlapRatio(a, b) {
+  const left = normalizeForOcrCompare(a);
+  const right = normalizeForOcrCompare(b);
+  if (!left || !right) return 0;
+  const freq = new Map();
+  for (const ch of right) freq.set(ch, (freq.get(ch) || 0) + 1);
+  let match = 0;
+  for (const ch of left) {
+    const count = freq.get(ch) || 0;
+    if (count > 0) {
+      match += 1;
+      freq.set(ch, count - 1);
+    }
+  }
+  return match / Math.max(left.length, right.length, 1);
+}
+
+function computeOcrNoiseRatio(text) {
+  const raw = String(text || '');
+  if (!raw.trim()) return 1;
+  const stripped = raw.replace(/\s+/g, '');
+  if (!stripped) return 1;
+  const weird = (stripped.match(/[^0-9a-zA-Z\u4e00-\u9fa5，。！？；：“”‘’、,.!?;:'"()\[\]（）【】《》—…\-]/g) || []).length;
+  return weird / Math.max(stripped.length, 1);
+}
+
+function classifyOverwriteRisk(metrics, confidence, noiseRatio) {
+  let risk = 0;
+  if ((metrics?.tinyComponentRatio || 0) > 0.62) risk += 1;
+  if ((metrics?.transitionDensity || 0) > 0.16) risk += 1;
+  if ((metrics?.darkPixelRatio || 0) > 0.24) risk += 1;
+  if (confidence < 55) risk += 1;
+  if (noiseRatio > 0.2) risk += 1;
+  return risk >= 4 ? '高' : risk >= 2 ? '中' : '低';
+}
+
+async function ensureTesseractLoaded() {
+  if (window.Tesseract) return window.Tesseract;
+  if (handwritingOcrScriptPromise) return handwritingOcrScriptPromise;
+  handwritingOcrScriptPromise = new Promise((resolve, reject) => {
+    const existing = document.querySelector('script[data-role="tesseract-ocr"]');
+    if (existing) {
+      existing.addEventListener('load', () => resolve(window.Tesseract), { once: true });
+      existing.addEventListener('error', () => reject(new Error('OCR脚本加载失败')), { once: true });
+      return;
+    }
+    const script = document.createElement('script');
+    script.src = HANDWRITING_OCR_CDN;
+    script.async = true;
+    script.dataset.role = 'tesseract-ocr';
+    script.onload = () => {
+      if (window.Tesseract) resolve(window.Tesseract);
+      else {
+        handwritingOcrScriptPromise = null;
+        reject(new Error('OCR库未正确加载'));
+      }
+    };
+    script.onerror = () => {
+      handwritingOcrScriptPromise = null;
+      reject(new Error('OCR脚本加载失败，请检查网络后重试'));
+    };
+    document.head.appendChild(script);
+  });
+  return handwritingOcrScriptPromise;
+}
+
+async function loadImageElement(source) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error('图片加载失败'));
+    img.src = source;
+  });
+}
+
+async function createProcessedCanvas(source, maxWidth, threshold = 182) {
+  const img = await loadImageElement(source);
+  const ratio = img.width > maxWidth ? maxWidth / img.width : 1;
+  const width = Math.max(1, Math.round(img.width * ratio));
+  const height = Math.max(1, Math.round(img.height * ratio));
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, width, height);
+  ctx.drawImage(img, 0, 0, width, height);
+  const imageData = ctx.getImageData(0, 0, width, height);
+  const data = imageData.data;
+  for (let i = 0; i < data.length; i += 4) {
+    const gray = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+    const boosted = gray < threshold ? 0 : 255;
+    data[i] = boosted;
+    data[i + 1] = boosted;
+    data[i + 2] = boosted;
+    data[i + 3] = 255;
+  }
+  ctx.putImageData(imageData, 0, 0);
+  return canvas;
+}
+
+function analyzeBinaryCanvasMetrics(canvas) {
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  const { width, height } = canvas;
+  const data = ctx.getImageData(0, 0, width, height).data;
+  const total = width * height;
+  const dark = new Uint8Array(total);
+  const rowDarkCounts = new Array(height).fill(0);
+  let darkPixels = 0;
+  let transitions = 0;
+  for (let y = 0; y < height; y += 1) {
+    let prev = 0;
+    for (let x = 0; x < width; x += 1) {
+      const idx = y * width + x;
+      const pixel = data[idx * 4];
+      const isDark = pixel < 128 ? 1 : 0;
+      dark[idx] = isDark;
+      if (isDark) {
+        darkPixels += 1;
+        rowDarkCounts[y] += 1;
+      }
+      if (x > 0 && isDark !== prev) transitions += 1;
+      prev = isDark;
+    }
+  }
+  const visited = new Uint8Array(total);
+  const stack = [];
+  let components = 0;
+  let tinyComponents = 0;
+  for (let i = 0; i < total; i += 1) {
+    if (!dark[i] || visited[i]) continue;
+    components += 1;
+    visited[i] = 1;
+    stack.push(i);
+    let size = 0;
+    while (stack.length) {
+      const current = stack.pop();
+      size += 1;
+      const x = current % width;
+      const y = Math.floor(current / width);
+      const neighbors = [
+        current - 1,
+        current + 1,
+        current - width,
+        current + width
+      ];
+      for (const next of neighbors) {
+        if (next < 0 || next >= total) continue;
+        const nx = next % width;
+        const ny = Math.floor(next / width);
+        if (Math.abs(nx - x) + Math.abs(ny - y) !== 1) continue;
+        if (!dark[next] || visited[next]) continue;
+        visited[next] = 1;
+        stack.push(next);
+      }
+    }
+    if (size <= 6) tinyComponents += 1;
+  }
+  const meanRow = rowDarkCounts.reduce((sum, value) => sum + value, 0) / Math.max(height, 1);
+  const variance = rowDarkCounts.reduce((sum, value) => sum + ((value - meanRow) ** 2), 0) / Math.max(height, 1);
+  return {
+    darkPixelRatio: darkPixels / Math.max(total, 1),
+    transitionDensity: transitions / Math.max(total, 1),
+    componentCount: components,
+    tinyComponentRatio: tinyComponents / Math.max(components, 1),
+    rowVariance: variance / Math.max(width * width, 1)
+  };
+}
+
+async function runHandwritingOcrAnalysis(draft) {
+  if (!HANDWRITING_SCAN_STATE.pages.length) {
+    return {
+      text: '',
+      confidence: 0,
+      overlapRatio: 0,
+      noiseRatio: 1,
+      overwriteRisk: '中',
+      metrics: {
+        darkPixelRatio: 0,
+        transitionDensity: 0,
+        componentCount: 0,
+        tinyComponentRatio: 0,
+        rowVariance: 0
+      }
+    };
+  }
+
+  if (HANDWRITING_SCAN_STATE.ocrResult && HANDWRITING_SCAN_STATE.metricsResult) {
+    const combinedText = HANDWRITING_SCAN_STATE.ocrResult.pages.map((item) => item.text).join('\n');
+    return {
+      text: combinedText,
+      confidence: HANDWRITING_SCAN_STATE.ocrResult.confidence,
+      overlapRatio: calculateTextOverlapRatio(combinedText, draft),
+      noiseRatio: computeOcrNoiseRatio(combinedText),
+      overwriteRisk: classifyOverwriteRisk(HANDWRITING_SCAN_STATE.metricsResult, HANDWRITING_SCAN_STATE.ocrResult.confidence, computeOcrNoiseRatio(combinedText)),
+      metrics: HANDWRITING_SCAN_STATE.metricsResult
+    };
+  }
+
+  updateHandwritingUi('loading', '正在加载OCR模型并识别手写图片，首次可能需要十几秒。');
+  const TesseractLib = await ensureTesseractLoaded();
+  const ocrPages = [];
+  const metricList = [];
+  for (let index = 0; index < HANDWRITING_SCAN_STATE.pages.length; index += 1) {
+    const page = HANDWRITING_SCAN_STATE.pages[index];
+    updateHandwritingUi('loading', `正在识别第${index + 1}/${HANDWRITING_SCAN_STATE.pages.length}页手写图片...`);
+    const ocrCanvas = await createProcessedCanvas(page.dataUrl, HANDWRITING_OCR_MAX_WIDTH, 176);
+    const analysisCanvas = await createProcessedCanvas(page.dataUrl, HANDWRITING_ANALYSIS_MAX_WIDTH, 180);
+    metricList.push(analyzeBinaryCanvasMetrics(analysisCanvas));
+    const result = await TesseractLib.recognize(ocrCanvas, 'chi_sim+eng', {
+      logger: (msg) => {
+        if (msg?.status === 'recognizing text' && typeof msg.progress === 'number') {
+          const percent = Math.round(msg.progress * 100);
+          updateHandwritingUi('loading', `正在识别第${index + 1}/${HANDWRITING_SCAN_STATE.pages.length}页：${percent}%`);
+        }
+      }
+    });
+    ocrPages.push({
+      text: String(result?.data?.text || ''),
+      confidence: Number(result?.data?.confidence || 0)
+    });
+  }
+
+  const confidence = ocrPages.reduce((sum, item) => sum + item.confidence, 0) / Math.max(ocrPages.length, 1);
+  const metricSummary = metricList.reduce((acc, item) => ({
+    darkPixelRatio: acc.darkPixelRatio + item.darkPixelRatio,
+    transitionDensity: acc.transitionDensity + item.transitionDensity,
+    componentCount: acc.componentCount + item.componentCount,
+    tinyComponentRatio: acc.tinyComponentRatio + item.tinyComponentRatio,
+    rowVariance: acc.rowVariance + item.rowVariance
+  }), {
+    darkPixelRatio: 0,
+    transitionDensity: 0,
+    componentCount: 0,
+    tinyComponentRatio: 0,
+    rowVariance: 0
+  });
+  Object.keys(metricSummary).forEach((key) => {
+    metricSummary[key] /= Math.max(metricList.length, 1);
+  });
+  HANDWRITING_SCAN_STATE.ocrResult = { pages: ocrPages, confidence };
+  HANDWRITING_SCAN_STATE.metricsResult = metricSummary;
+  const text = ocrPages.map((item) => item.text).join('\n');
+  const noiseRatio = computeOcrNoiseRatio(text);
+  const overlapRatio = calculateTextOverlapRatio(text, draft);
+  const overwriteRisk = classifyOverwriteRisk(metricSummary, confidence, noiseRatio);
+  updateHandwritingUi('done', `OCR完成：平均识别置信度约${Math.round(confidence)}%，疑似涂改风险${overwriteRisk}。`);
+  return {
+    text,
+    confidence,
+    overlapRatio,
+    noiseRatio,
+    overwriteRisk,
+    metrics: metricSummary
+  };
+}
+
 function initParticles() {
   const container = document.getElementById('particles');
   if (!container) return;
@@ -306,6 +682,8 @@ function initAgentWorkbench() {
   const clearMaterialInputBtn = document.getElementById('clearMaterialInputBtn');
   const materialCardList = document.getElementById('materialCardList');
   const exampleTrainingList = document.getElementById('exampleTrainingList');
+  const handwritingImageInput = document.getElementById('handwritingImageInput');
+  const clearHandwritingImageBtn = document.getElementById('clearHandwritingImageBtn');
   const examCountdown = document.getElementById('examCountdown');
   const examWordCount = document.getElementById('examWordCount');
   const startExamModeBtn = document.getElementById('startExamModeBtn');
@@ -322,8 +700,21 @@ function initAgentWorkbench() {
   renderEssaySampleList(essaySampleList, uiState.activeFilter, uiState.favorites);
   renderMaterialCardList(materialCardList);
   renderExampleTrainingList(exampleTrainingList);
+  renderHandwritingPreviewList();
+  updateHandwritingUi('ready', HANDWRITING_SCAN_STATE.pages.length ? '已上传手写图片，评分时会自动OCR识别。' : '未上传手写图片时，书写项暂按中档估计。');
   updateExamWordCountDisplay(draftInput, examWordCount);
   renderExamCountdown(examCountdown, examState.remaining);
+
+  handwritingImageInput?.addEventListener('change', async (e) => {
+    try {
+      await handleHandwritingFiles(e.target.files);
+    } catch (error) {
+      HANDWRITING_SCAN_STATE.status = 'error';
+      HANDWRITING_SCAN_STATE.error = error?.message || '图片读取失败';
+      updateHandwritingUi('error', `手写图片读取失败：${HANDWRITING_SCAN_STATE.error}`);
+    }
+  });
+  clearHandwritingImageBtn?.addEventListener('click', () => clearHandwritingUpload(handwritingImageInput));
 
   analyzeBtn.addEventListener('click', () => {
     const topic = topicInput.value.trim();
@@ -365,71 +756,68 @@ function initAgentWorkbench() {
     catch (e) { resultContainer.innerHTML = `<p class="agent-empty">防跑题检查失败：${escapeHtml(e?.message || '未知错误')}</p>`; }
   });
 
-  scoreDraftBtn?.addEventListener('click', () => {
+  scoreDraftBtn?.addEventListener('click', async () => {
     const topic = topicInput.value.trim();
     const draft = draftInput.value.trim();
     if (!topic) return void (resultContainer.innerHTML = '<p class="agent-empty">请先输入作文题目。</p>');
     if (!draft) return void (resultContainer.innerHTML = '<p class="agent-empty">请先粘贴作文草稿。</p>');
-    const score = scoreEssayDraft(topic, draft);
-    updateTrainingStats(score.dimensions, {
+    resultContainer.innerHTML = '<p class="agent-empty">正在生成上海模考阅卷报告，请稍候...</p>';
+    const legacyScore = scoreEssayDraft(topic, draft);
+    const report = await buildShanghaiTeacherReviewReport(topic, draft);
+    updateTrainingStats(legacyScore.dimensions, {
       topic,
-      total: score.total,
-      score70: score.score70,
-      riskLevel: score.offTopic?.riskLevel || '中',
+      total: legacyScore.total,
+      score70: legacyScore.score70,
+      riskLevel: legacyScore.offTopic?.riskLevel || '中',
       source: 'score',
       topicType: detectTopicType(topic).name
     });
-    recordErrorBookEntry({ topic, draft, score, offTopic: score.offTopic, source: 'score' });
-    renderScoreReport(score, resultContainer);
+    recordErrorBookEntry({ topic, draft, score: legacyScore, offTopic: legacyScore.offTopic, source: 'score' });
+    renderTeacherScoreReport(report, resultContainer);
   });
 
-  masterCritiqueBtn?.addEventListener('click', () => {
+  masterCritiqueBtn?.addEventListener('click', async () => {
     const topic = topicInput.value.trim();
     const draft = draftInput.value.trim();
     if (!topic) return void (resultContainer.innerHTML = '<p class="agent-empty">请先输入作文题目。</p>');
     if (!draft) return void (resultContainer.innerHTML = '<p class="agent-empty">请先粘贴作文草稿。</p>');
-    const report = buildMasterCritiqueReport(topic, draft);
-    updateTrainingStats(report.score.dimensions, {
+    resultContainer.innerHTML = '<p class="agent-empty">正在生成老师式逐段精批，请稍候...</p>';
+    const legacyReport = buildMasterCritiqueReport(topic, draft);
+    const teacherReport = await buildShanghaiTeacherReviewReport(topic, draft);
+    updateTrainingStats(legacyReport.score.dimensions, {
       topic,
-      total: report.score.total,
-      score70: report.score.score70,
-      riskLevel: report.score.offTopic?.riskLevel || '中',
+      total: legacyReport.score.total,
+      score70: legacyReport.score.score70,
+      riskLevel: legacyReport.score.offTopic?.riskLevel || '中',
       source: 'critique',
       topicType: detectTopicType(topic).name
     });
-    recordErrorBookEntry({ topic, draft, score: report.score, offTopic: report.score.offTopic, source: 'critique' });
-    renderMasterCritiqueReport(report, resultContainer);
+    recordErrorBookEntry({ topic, draft, score: legacyReport.score, offTopic: legacyReport.score.offTopic, source: 'critique' });
+    renderTeacherCritiqueReport(teacherReport, resultContainer);
   });
 
-  improveDraftBtn?.addEventListener('click', () => {
+  improveDraftBtn?.addEventListener('click', async () => {
     const topic = topicInput.value.trim();
     const draft = draftInput.value.trim();
     if (!topic) return void (resultContainer.innerHTML = '<p class="agent-empty">请先输入作文题目。</p>');
     if (!draft) return void (resultContainer.innerHTML = '<p class="agent-empty">请先粘贴作文草稿。</p>');
-    const boost = applyScoreBoostRewrite(topic, draft);
-    draftInput.value = boost.newDraft;
-    updateExamWordCountDisplay(draftInput, examWordCount);
-    updateTrainingStats(boost.after.dimensions, {
-      topic,
-      total: boost.after.total,
-      score70: boost.after.score70,
-      riskLevel: boost.after.offTopic?.riskLevel || '中',
-      source: 'boost',
-      topicType: detectTopicType(topic).name
-    });
-    renderScoreBoostReport(boost, resultContainer);
+    resultContainer.innerHTML = '<p class="agent-empty">正在整理修改任务单，请稍候...</p>';
+    const teacherReport = await buildShanghaiTeacherReviewReport(topic, draft);
+    renderRevisionTaskList(teacherReport, resultContainer);
   });
 
   weeklyDashboardBtn?.addEventListener('click', () => {
     renderWeeklyDashboardReport(buildWeeklyTrainingDashboard(), resultContainer);
   });
 
-  baselineCheckBtn?.addEventListener('click', () => {
-    renderBaselineCheckReport(runBaselineHealthCheck(), resultContainer);
+  baselineCheckBtn?.addEventListener('click', async () => {
+    resultContainer.innerHTML = '<p class="agent-empty">正在进行基础自检，请稍候...</p>';
+    renderBaselineCheckReport(await runBaselineHealthCheck(), resultContainer);
   });
 
-  regressionTestBtn?.addEventListener('click', () => {
-    renderRegressionReport(runRegressionSuite(), resultContainer);
+  regressionTestBtn?.addEventListener('click', async () => {
+    resultContainer.innerHTML = '<p class="agent-empty">正在运行回归测试，请稍候...</p>';
+    renderRegressionReport(await runRegressionSuite(), resultContainer);
   });
 
   copyBtn?.addEventListener('click', async () => { const t = resultContainer.innerText.trim(); if (t) { try { await navigator.clipboard.writeText(t); } catch (_) {} } });
@@ -675,81 +1063,25 @@ function initAgentWorkbench() {
 
     const fixBtn = e.target.closest('.flaw-fix-btn');
     if (fixBtn) {
-      const topic = topicInput.value.trim();
-      const draft = draftInput.value;
-      const idx = parseInt(fixBtn.dataset.flawIndex || '-1', 10);
-      const report = runOffTopicCheck(topic, draft);
-      const flaw = report.flawScan[idx];
-      if (!flaw) return;
-      const replaced = replaceParagraphLeadSentence(draft, flaw.paragraphIndex, flaw.rewriteLead);
-      if (!replaced.ok) return;
-      draftInput.value = replaced.newDraft;
-      updateExamWordCountDisplay(draftInput, examWordCount);
-      renderOffTopicReport(runOffTopicCheck(topic, replaced.newDraft), resultContainer);
+      resultContainer.innerHTML = '<p class="agent-empty">这里只指出漏洞位置，请学生自己重写对应句子。</p>';
       return;
     }
 
     const gapFixBtn = e.target.closest('.triad-gap-fix-btn');
     if (gapFixBtn) {
-      const topic = topicInput.value.trim();
-      const draft = draftInput.value.trim();
-      if (!topic || !draft) return;
-      const report = runOffTopicCheck(topic, draft);
-      const fixed = applyTriadGapFix(topic, draft, report);
-      draftInput.value = fixed.newDraft;
-      updateExamWordCountDisplay(draftInput, examWordCount);
-      if (typeof fixed.highlightStart === 'number' && typeof fixed.highlightEnd === 'number') {
-        draftInput.focus();
-        draftInput.setSelectionRange(fixed.highlightStart, fixed.highlightEnd);
-      }
-      renderOffTopicReport(runOffTopicCheck(topic, fixed.newDraft), resultContainer);
+      resultContainer.innerHTML = '<p class="agent-empty">三维缺口已指出，请学生根据提示自行补写，不由AI代改。</p>';
       return;
     }
 
     const paraRewriteBtn = e.target.closest('.paragraph-rewrite-btn');
     if (paraRewriteBtn) {
-      const topic = topicInput.value.trim();
-      const draft = draftInput.value.trim();
-      if (!topic || !draft) return;
-      const idx = parseInt(paraRewriteBtn.dataset.paragraphIndex || '-1', 10);
-      const reportType = paraRewriteBtn.dataset.reportType || 'offtopic';
-      const report = runOffTopicCheck(topic, draft);
-      const advice = report.paragraphAdvice?.[idx];
-      if (!advice) return;
-      const rewritten = rewriteParagraphByAdvice(topic, draft, advice);
-      if (!rewritten.ok) return;
-      draftInput.value = rewritten.newDraft;
-      updateExamWordCountDisplay(draftInput, examWordCount);
-      if (typeof rewritten.highlightStart === 'number' && typeof rewritten.highlightEnd === 'number') {
-        draftInput.focus();
-        draftInput.setSelectionRange(rewritten.highlightStart, rewritten.highlightEnd);
-      }
-      if (reportType === 'score') {
-        const rescored = scoreEssayDraft(topic, rewritten.newDraft);
-        renderScoreReport(rescored, resultContainer);
-      } else {
-        renderOffTopicReport(runOffTopicCheck(topic, rewritten.newDraft), resultContainer);
-      }
+      resultContainer.innerHTML = '<p class="agent-empty">逐段问题已经标明，请学生自己重写该段，不由AI代写。</p>';
       return;
     }
 
     const boostBtn = e.target.closest('.apply-score-boost-btn');
     if (boostBtn) {
-      const topic = topicInput.value.trim();
-      const draft = draftInput.value.trim();
-      if (!topic || !draft) return;
-      const boost = applyScoreBoostRewrite(topic, draft);
-      draftInput.value = boost.newDraft;
-      updateExamWordCountDisplay(draftInput, examWordCount);
-      updateTrainingStats(boost.after.dimensions, {
-        topic,
-        total: boost.after.total,
-        score70: boost.after.score70,
-        riskLevel: boost.after.offTopic?.riskLevel || '中',
-        source: 'boost',
-        topicType: detectTopicType(topic).name
-      });
-      renderScoreBoostReport(boost, resultContainer);
+      resultContainer.innerHTML = '<p class="agent-empty">提分方向已经列出，请学生自己据此修改，不由AI代改正文。</p>';
       return;
     }
 
@@ -948,6 +1280,7 @@ function analyzeEssayTopic(topic) {
   const topicType = detectTopicType(topic);
   const topicPhrases = normalizeTopicPhrases(extractTopicPhrases(topic));
   const exampleGuidedKit = buildExampleGuidedKit(topic, topicType, topicPhrases);
+  const methodGuidedKit = buildMethodGuidedKit(topic, topicType, topicPhrases);
   const hiddenPremise = detectHiddenPremise(topic, topicType, topicPhrases);
   const mustAnswerQuestions = dedupeArray([
     ...buildMustAnswerQuestions(topic, topicType, topicPhrases, hiddenPremise),
@@ -987,6 +1320,7 @@ function analyzeEssayTopic(topic) {
     triadTrainingKit,
     threePathKit,
     exampleGuidedKit,
+    methodGuidedKit,
     hiddenPremise,
     mustAnswerQuestions,
     pitfalls,
@@ -1050,6 +1384,7 @@ function renderAgentResult(analysis, container) {
   const threePathKit = analysis.threePathKit || { concept: [], classify: [], reality: [], caution: '' };
   const matchedExamples = pickRelevantExampleCards(analysis.topic, analysis.topicType, 3);
   const exampleGuidedKit = analysis.exampleGuidedKit || null;
+  const methodGuidedKit = analysis.methodGuidedKit || null;
   const matchedExampleRows = renderTrainingExampleQuickRows(matchedExamples);
   const exampleGuidedBlock = exampleGuidedKit ? `
     <div class="agent-result-block">
@@ -1064,6 +1399,22 @@ function renderAgentResult(analysis, container) {
       <ul>${(exampleGuidedKit.pitfalls || []).map((x) => `<li>${escapeHtml(x)}</li>`).join('')}</ul>
       <p><strong>生成提醒</strong></p>
       <ul>${(exampleGuidedKit.generatorHints || []).map((x) => `<li>${escapeHtml(x)}</li>`).join('')}</ul>
+    </div>
+  ` : '';
+  const methodGuidedBlock = methodGuidedKit ? `
+    <div class="agent-result-block">
+      <h4>22-23 方法论提醒</h4>
+      <p>这部分来自《作文范例 22-23》的备考方法档案，用来把“会想”真正变成“会写”。</p>
+      <div class="score-grid">
+        ${(methodGuidedKit.notes || []).map((note) => `
+          <div class="flaw-row">
+            <div class="flaw-row-top"><span>${escapeHtml(note.title)}</span><strong>${escapeHtml(note.source || '')}</strong></div>
+            <p>${escapeHtml(note.focus || '')}</p>
+          </div>
+        `).join('')}
+      </div>
+      <p><strong>分析时先做这几步</strong></p>
+      <ul>${(methodGuidedKit.analysisActions || []).map((x) => `<li>${escapeHtml(x)}</li>`).join('')}</ul>
     </div>
   ` : '';
   const pathTraining = getPathTrainingState(analysis.topic);
@@ -1088,6 +1439,7 @@ function renderAgentResult(analysis, container) {
       <div class="agent-tags">${tags}<span class="agent-tag">题型：${escapeHtml(analysis.topicType.name)}</span></div>
     </div>
     ${exampleGuidedBlock}
+    ${methodGuidedBlock}
     <div class="agent-result-block"><h4>出题人意图（筛选什么）</h4><ul>${intentRows}</ul></div>
     <div class="agent-result-block"><h4>三步拆题法（立刻可用）</h4><ul>${stepRows}</ul></div>
     <div class="agent-result-block"><h4>必答清单（不答会掉档）</h4><ul>${checklistRows}</ul></div>
@@ -2289,6 +2641,52 @@ function buildExampleGuidedKit(topic, topicType, topicPhrases) {
   };
 }
 
+function loadShanghaiMethodArchive() {
+  return Array.isArray(SHANGHAI_METHOD_ARCHIVE) ? SHANGHAI_METHOD_ARCHIVE : [];
+}
+
+function scoreMethodArchiveNote(note, topic, topicType) {
+  const text = String(topic || '');
+  let score = 0;
+  (note.keywords || []).forEach((kw) => {
+    if (kw && text.includes(kw)) score += 10;
+  });
+  const typeName = typeof topicType === 'string'
+    ? ({ relation: '关系辩证题', value: '价值判断题', problem: '问题式命题', phenomenon: '现象评析题' }[topicType] || topicType)
+    : topicType?.name;
+  if (typeName && (note.topicTypes || []).includes(typeName)) score += 12;
+  if (/是否|如何|怎样|怎么看|意味着/.test(text) && (note.id === 'method-hidden-relation')) score += 8;
+  if (/现实|社会|时代|生活|青年/.test(text) && (note.id === 'method-look-up-road')) score += 8;
+  if (note.id === 'method-look-back-resource') score += 4;
+  return score;
+}
+
+function pickMethodArchiveNotes(topic, topicType, limit = 3) {
+  return loadShanghaiMethodArchive()
+    .map((note) => ({ ...note, matchScore: scoreMethodArchiveNote(note, topic, topicType) }))
+    .filter((note) => note.matchScore > 0)
+    .sort((a, b) => b.matchScore - a.matchScore)
+    .slice(0, limit);
+}
+
+function buildMethodGuidedKit(topic, topicType, topicPhrases) {
+  const notes = pickMethodArchiveNotes(topic, topicType, 3);
+  if (!notes.length) return null;
+  const topicKey = topicPhrases?.[0] || extractTopicPhrases(topic)[0] || '题眼';
+  return {
+    notes,
+    summary: dedupeArray(notes.map((note) => note.focus)).slice(0, 3),
+    analysisActions: dedupeArray([
+      ...notes.flatMap((note) => note.analysisUse || []),
+      `围绕“${topicKey}”先找现实锚点、再找隐含关系，最后决定结构。`
+    ]).slice(0, 5),
+    critiqueActions: dedupeArray([
+      ...notes.flatMap((note) => note.critiqueUse || []),
+      `重读全文时，先检查是否真正回应了“${topicKey}”，再决定补哪一段。`
+    ]).slice(0, 5)
+  };
+}
+
 function convertExampleTrainingCardToMaterialCard(card) {
   return {
     id: `example-${card.id}`,
@@ -2666,7 +3064,7 @@ function renderGeneratedEssayReport(payload, container) {
       <ul>
         <li>完整范文已写入草稿框，可直接继续修改。</li>
         <li>已自动完成防跑题检查与评分。</li>
-        <li>如需进一步提分，可点击“按提分动作一键改写”。</li>
+        <li>如需进一步提分，可继续查看“草稿评分”与“修改任务单”。</li>
       </ul>
       <p>题目：${escapeHtml(topic)}</p>
       ${exampleAnchorTitle ? `<p>本次已调用范例母题：${escapeHtml(exampleAnchorTitle)}</p>` : ''}
@@ -3287,13 +3685,11 @@ function renderOffTopicReport(report, container) {
     <div class="agent-result-block">
       <h4>三维训练缺口提示</h4>
       <ul>${triadGapRows || '<li>当前三维表现较均衡。</li>'}</ul>
-      <div class="agent-actions secondary">
-        <button class="agent-btn primary triad-gap-fix-btn" type="button">一键补缺</button>
-      </div>
+      <p class="agent-para-issues">请根据以上缺口，自己补写对应段落中的概念界定、机制解释或边界句。</p>
     </div>
     <div class="agent-result-block"><h4>修正建议</h4><ul>${suggestionItems}</ul></div>
     <div class="agent-result-block"><h4>段落贴合图</h4><div class="score-grid">${paragraphCards || '<p>暂无段落</p>'}</div></div>
-    <div class="agent-result-block"><h4>段落级诊断与一键改写</h4>${paragraphAdviceRows}</div>
+    <div class="agent-result-block"><h4>段落级诊断</h4>${paragraphAdviceRows}</div>
     <div class="agent-result-block"><h4>句子质量提示</h4><p>高分句候选</p><ul>${goodSentences || '<li>暂无</li>'}</ul><p>低分句预警</p><ul>${badSentences || '<li>暂无</li>'}</ul></div>
     <div class="agent-result-block"><h4>论证漏洞扫描</h4>${renderFlawScanRows(report.flawScan || [])}</div>`;
 }
@@ -3307,7 +3703,7 @@ function renderParagraphAdviceRows(adviceList, reportType = 'offtopic') {
       <p>建议：${escapeHtml(item.suggestion)}</p>
       <div class="flaw-actions">
         <span class="flaw-target">${escapeHtml((item.issues || []).join(' / ') || '本段基础较稳')}</span>
-        <button class="agent-btn ghost paragraph-rewrite-btn" type="button" data-report-type="${escapeHtml(reportType)}" data-paragraph-index="${item.index}">一键改写本段</button>
+        <span class="flaw-target">请学生自己重写这一段，不替写。</span>
       </div>
     </div>`).join('');
 }
@@ -3319,7 +3715,7 @@ function renderFlawScanRows(flawScan) {
       <div class="flaw-row-top"><span>${escapeHtml(item.name)}</span><strong class="flaw-level ${item.level === '高' ? 'high' : 'medium'}">${item.level}优先级</strong></div>
       <p>识别依据：${escapeHtml(item.evidence)}</p>
       <p>修复动作：${escapeHtml(item.fix)}</p>
-      <div class="flaw-actions"><span class="flaw-target">定位：第${item.paragraphIndex + 1}段首句</span><button class="flaw-fix-btn" type="button" data-flaw-index="${idx}">一键修复段首句</button></div>
+      <div class="flaw-actions"><span class="flaw-target">定位：第${item.paragraphIndex + 1}段首句，请学生自己改。</span></div>
     </div>`).join('');
 }
 
@@ -3401,6 +3797,429 @@ function scoreEssayDraft(topic, draft) {
   };
 }
 
+const STALE_MATERIAL_PATTERNS = [
+  '司马迁', '屈原', '苏武', '爱迪生', '海伦凯勒', '居里夫人', '霍金', '贝多芬', '牛顿', '达芬奇'
+];
+
+const CURRENT_MATERIAL_PATTERNS = [
+  '人工智能', 'AI', '算法', '平台', '短视频', '社交媒体', 'ChatGPT', '芯片', '航天', '碳中和', '外卖', '直播'
+];
+
+function getDraftSentenceMap(draft) {
+  return splitParagraphs(draft).map((paragraph, index) => ({
+    index,
+    text: paragraph,
+    sentences: splitSentences(paragraph)
+  }));
+}
+
+function takeSentencePreview(sentence, maxLen = 26) {
+  const clean = String(sentence || '').replace(/\s+/g, '').trim();
+  if (clean.length <= maxLen) return clean;
+  return `${clean.slice(0, maxLen)}…`;
+}
+
+function findSentenceLocation(draft, sentence) {
+  const sentenceMap = getDraftSentenceMap(draft);
+  const target = String(sentence || '').trim();
+  for (const row of sentenceMap) {
+    const hit = row.sentences.find((x) => target && x.includes(target));
+    if (hit) return { paragraphIndex: row.index, sentence: hit };
+  }
+  return null;
+}
+
+function getCoreIntentBand(offTopic) {
+  const riskScore = Number(offTopic?.riskScore || 0);
+  const topicFit = Number((offTopic?.scaffold?.dimensions || []).find((d) => d.id === 'd1')?.score || 0);
+  const score = Math.round((riskScore * 0.55 + topicFit * 0.45) / 100 * 18);
+  if (riskScore >= 80 && topicFit >= 75) {
+    return { band: '一类', score: clamp(score, 15, 18), detail: '紧扣材料核心问法，未见明显偏题。' };
+  }
+  if (riskScore >= 60 && topicFit >= 55) {
+    return { band: '二类', score: clamp(score, 11, 15), detail: '基本扣住材料，但局部段落开始离开题眼。' };
+  }
+  if (riskScore >= 40 && topicFit >= 35) {
+    return { band: '三类', score: clamp(score, 7, 11), detail: '能碰到材料边缘，但核心立意不稳，容易写散。' };
+  }
+  return { band: '四类', score: clamp(score, 0, 7), detail: '偏离材料核心明显，文章主要在自说自话。' };
+}
+
+function assessThesisLine(topic, draft, analysis) {
+  const paragraphs = splitParagraphs(draft);
+  const sentenceMap = getDraftSentenceMap(draft);
+  const topicPhrases = analysis.topicPhrases || [];
+  const thesisPattern = /(我认为|在我看来|我更倾向于|关键在于|真正|不是|而是|因此|可见)/;
+  let thesisSentence = '';
+  let thesisParagraph = -1;
+  sentenceMap.slice(0, 2).forEach((row) => {
+    if (thesisSentence) return;
+    const hit = row.sentences.find((sentence) => thesisPattern.test(sentence) || topicPhrases.some((phrase) => phrase && sentence.includes(phrase)));
+    if (hit) {
+      thesisSentence = hit;
+      thesisParagraph = row.index;
+    }
+  });
+  const thesisKeywords = normalizeTopicPhrases(extractTopicPhrases(thesisSentence || analysis.thesis || topic));
+  const carryingParagraphs = paragraphs.filter((paragraph) => thesisKeywords.some((kw) => kw && paragraph.includes(kw))).length;
+  const carryRatio = paragraphs.length ? carryingParagraphs / paragraphs.length : 0;
+  const score = clamp((thesisSentence ? 4 : 1) + Math.round(carryRatio * 6), 0, 10);
+  return {
+    score,
+    max: 10,
+    thesisSentence,
+    thesisParagraph,
+    carryRatio,
+    detail: thesisSentence
+      ? `中心论点已出现，位于第${thesisParagraph + 1}段；但是否贯穿，要看后文是否持续回扣。`
+      : '开头两段没有稳定立住中心论点，读者需要替你猜观点。'
+  };
+}
+
+function assessArgumentLogic(draft) {
+  const quoteCount = countMatches(draft, /(“[^”]{2,24}”|曾言|曾说|曾指出|正如|正所谓|孔子|鲁迅)/g);
+  const exampleCount = countMatches(draft, /(例如|比如|以.+?为例|案例|譬如|屈原|司马迁|AI|人工智能|短视频|社交媒体|航天)/g);
+  const metaphorCount = countMatches(draft, /(像|如同|仿佛|恰似|好比|不是.+而是.+)/g);
+  const turnCount = countMatches(draft, /(诚然|然而|但是|不过|另一方面|同时|反过来)/g);
+  const logicCount = countMatches(draft, /(因为|所以|因此|由此|从而|意味着|这说明|可见)/g);
+  const score = clamp(
+    Math.min(4, logicCount) +
+    Math.min(3, turnCount) +
+    (quoteCount > 0 ? 2 : 0) +
+    (exampleCount > 0 ? 2 : 0) +
+    (metaphorCount > 0 ? 1 : 0),
+    0,
+    12
+  );
+  return {
+    score,
+    max: 12,
+    quoteCount,
+    exampleCount,
+    metaphorCount,
+    detail: `引证${quoteCount}处，例证${exampleCount}处，比喻论证${metaphorCount}处；逻辑转折${turnCount}处，因果推进${logicCount}处。`
+  };
+}
+
+function assessMaterialFreshness(draft) {
+  const staleHits = STALE_MATERIAL_PATTERNS.filter((name) => draft.includes(name));
+  const freshHits = CURRENT_MATERIAL_PATTERNS.filter((name) => draft.includes(name));
+  let score = 6;
+  if (freshHits.length) score += 2;
+  if (staleHits.length && !freshHits.length) score -= 2;
+  if (!staleHits.length && !freshHits.length) score -= 1;
+  return {
+    score: clamp(score, 0, 8),
+    max: 8,
+    staleHits,
+    freshHits,
+    detail: staleHits.length && !freshHits.length
+      ? `检测到较常见素材：${staleHits.join('、')}；按约定扣2分。`
+      : (freshHits.length
+        ? `能看到较新的现实材料：${freshHits.join('、')}。`
+        : '未见明显过时素材，但现实材料的新鲜度还不够高。')
+  };
+}
+
+function assessLanguageExpression(topic, draft, analysis) {
+  const sentenceQuality = analyzeSentenceQuality(topic, draft, analysis.topicPhrases || []);
+  const duplicated = splitSentences(draft).filter((sentence, idx, arr) => sentence && arr.indexOf(sentence) !== idx);
+  const tooLong = splitSentences(draft).filter((sentence) => sentence.replace(/\s+/g, '').length >= 60);
+  const punctuationIssue = countMatches(draft, /(。。|，，|；；|！！|？？|、，|，。)/g);
+  const quoteMismatch = (countMatches(draft, /“/g) !== countMatches(draft, /”/g)) ? 1 : 0;
+  const typoEstimate = duplicated.length + punctuationIssue + quoteMismatch;
+  let score = 6 + Math.min(2, (sentenceQuality.good || []).length) - Math.min(3, typoEstimate) - Math.min(2, tooLong.length > 2 ? 2 : tooLong.length);
+  score = clamp(score, 0, 10);
+  return {
+    score,
+    max: 10,
+    typoEstimate,
+    goodSentences: sentenceQuality.good || [],
+    weakSentences: dedupeArray([...(sentenceQuality.bad || []), ...tooLong.slice(0, 2), ...duplicated.slice(0, 1)]).slice(0, 3),
+    detail: `疑似病句/冗长句${tooLong.length}处，重复句${duplicated.length}处，标点或引号问题${punctuationIssue + quoteMismatch}处。`
+  };
+}
+
+function assessStructureDraft(draft, analysis) {
+  const paragraphs = splitParagraphs(draft);
+  const intro = paragraphs[0] || '';
+  const ending = paragraphs[paragraphs.length - 1] || '';
+  const turnCount = countMatches(draft, /(然而|但|不过|另一方面|同时|进一步说|再看|最后)/g);
+  const hasOpening = intro.length >= 30;
+  const hasEnding = ending.length >= 25 && /(因此|所以|总之|回到题目|可见|由此看来)/.test(ending);
+  const hasMiddle = paragraphs.length >= 4;
+  const score = clamp((hasOpening ? 2 : 1) + (hasMiddle ? 3 : 1) + (turnCount >= 2 ? 2 : 1) + (hasEnding ? 1 : 0), 0, 8);
+  return {
+    score,
+    max: 8,
+    paragraphs: paragraphs.length,
+    detail: `当前共${paragraphs.length}段；${hasOpening ? '起段已入题' : '起段入题偏慢'}，${hasEnding ? '结尾有收束' : '结尾收束偏弱'}。`
+  };
+}
+
+async function assessHandwritingByOCR(draft) {
+  if (!HANDWRITING_SCAN_STATE.pages.length) {
+    return {
+      score: 2,
+      max: 4,
+      detail: '当前只输入了文本，未上传手写作文图片，OCR无法判断涂改与书写；本项暂按中档估计。'
+    };
+  }
+  try {
+    const ocr = await runHandwritingOcrAnalysis(draft);
+    let score = 4;
+    if (ocr.confidence < 74) score -= 1;
+    if (ocr.noiseRatio > 0.12) score -= 1;
+    if (ocr.overwriteRisk === '中') score -= 1;
+    if (ocr.overwriteRisk === '高') score -= 2;
+    if (ocr.overlapRatio > 0 && ocr.overlapRatio < 0.45) score -= 1;
+    score = clamp(score, 1, 4);
+    const detail = [
+      `已识别${HANDWRITING_SCAN_STATE.pages.length}页手写图片，平均置信度约${Math.round(ocr.confidence)}%。`,
+      `疑似噪音率约${Math.round(ocr.noiseRatio * 100)}%，文本匹配度约${Math.round(ocr.overlapRatio * 100)}%。`,
+      `疑似涂改风险：${ocr.overwriteRisk}。`
+    ].join('');
+    return { score, max: 4, detail };
+  } catch (error) {
+    HANDWRITING_SCAN_STATE.status = 'error';
+    HANDWRITING_SCAN_STATE.error = error?.message || 'OCR识别失败';
+    updateHandwritingUi('error', `OCR识别失败：${HANDWRITING_SCAN_STATE.error}`);
+    return {
+      score: 2,
+      max: 4,
+      detail: `已上传手写图片，但OCR识别失败：${HANDWRITING_SCAN_STATE.error}；本项暂按中档估计。`
+    };
+  }
+}
+
+function buildParagraphIssueRowsForTeacher(topic, draft, offTopic, thesisCheck) {
+  const adviceList = offTopic?.paragraphAdvice || [];
+  return adviceList.map((item) => ({
+    index: item.index,
+    paragraph: item.index + 1,
+    score: item.score,
+    issue: item.focus,
+    suggestion: item.suggestion,
+    issues: item.issues || []
+  })).slice(0, 5);
+}
+
+function buildTeacherShortComment(report) {
+  const goodSentence = report.language.goodSentences[0] || report.thesis.thesisSentence || '';
+  const goodLocation = findSentenceLocation(report.draft, goodSentence);
+  const weakPara = report.paragraphRows.find((row) => row.score < 78) || report.paragraphRows[0];
+  const weakLead = weakPara ? takeSentencePreview((splitSentences(splitParagraphs(report.draft)[weakPara.index] || '')[0] || '')) : '';
+  const parts = [];
+  if (goodLocation && goodSentence) {
+    parts.push(`第${goodLocation.paragraphIndex + 1}段“${takeSentencePreview(goodSentence, 18)}”能扣题。`);
+  }
+  if (weakPara && weakLead) {
+    parts.push(`第${weakPara.index + 1}段“${weakLead}”只起话头，分析没跟上。`);
+  }
+  parts.push(report.structure.score >= 6 ? '结构顺序基本看得清。' : '起承转合还没完全站稳。');
+  return parts.join('').slice(0, 80);
+}
+
+function buildTeacherRevisionSuggestions(report) {
+  const suggestions = [];
+  const weakRows = report.paragraphRows || [];
+  const firstWeak = weakRows[0];
+  const secondWeak = weakRows[1] || weakRows[0];
+  const lastWeak = weakRows[weakRows.length - 1] || weakRows[0];
+  if (report.thesis.score < 7) {
+    const thesisParagraph = Math.max(1, (report.thesis.thesisParagraph ?? 0) + 1);
+    suggestions.push(`先改第${thesisParagraph}段中心句，把总判断写成一句完整判断句，不要只摆态度。`);
+  } else {
+    suggestions.push(`先看第${firstWeak ? firstWeak.paragraph : 2}段，把中心论点中的关键词再回扣一次，避免开头说过、后文散掉。`);
+  }
+  if (report.argument.exampleCount === 0 || report.argument.quoteCount === 0) {
+    suggestions.push(`重点改第${secondWeak ? secondWeak.paragraph : 2}段，补一处引证或例证，补完后紧跟一句“为什么这个例子能证明你的判断”。`);
+  } else {
+    suggestions.push(`检查第${secondWeak ? secondWeak.paragraph : 2}段材料后面有没有分析句，别让论据停在“讲完故事就结束”。`);
+  }
+  if (report.language.typoEstimate > 0 || report.structure.score < 6) {
+    suggestions.push(`最后回看第${lastWeak ? lastWeak.paragraph : 5}段，专改长句、重复句和结尾空话，不追求新写一段，只把原文压紧。`);
+  } else {
+    suggestions.push(`最后收一收第${lastWeak ? lastWeak.paragraph : 5}段，结尾缩短半段，回到题眼，不要在末段再铺新意思。`);
+  }
+  return suggestions.slice(0, 3);
+}
+
+async function buildShanghaiTeacherReviewReport(topic, draft) {
+  const analysis = analyzeEssayTopic(topic);
+  const offTopic = runOffTopicCheck(topic, draft);
+  const intent = getCoreIntentBand(offTopic);
+  const thesis = assessThesisLine(topic, draft, analysis);
+  const argument = assessArgumentLogic(draft);
+  const material = assessMaterialFreshness(draft);
+  const language = assessLanguageExpression(topic, draft, analysis);
+  const structure = assessStructureDraft(draft, analysis);
+  const handwriting = await assessHandwritingByOCR(draft);
+  const total = intent.score + thesis.score + argument.score + material.score + language.score + structure.score + handwriting.score;
+  const paragraphRows = buildParagraphIssueRowsForTeacher(topic, draft, offTopic, thesis);
+  const report = {
+    topic,
+    draft,
+    analysis,
+    offTopic,
+    intent,
+    thesis,
+    argument,
+    material,
+    language,
+    structure,
+    handwriting,
+    paragraphRows,
+    total70: clamp(total, 0, 70)
+  };
+  report.comment80 = buildTeacherShortComment(report);
+  report.suggestions = buildTeacherRevisionSuggestions(report);
+  return report;
+}
+
+function renderTeacherDimensionRows(report) {
+  const rows = [
+    ['材料核心立意', `${report.intent.score}/${report.intent.max}`, `判定：${report.intent.band}｜${report.intent.detail}`],
+    ['中心论点', `${report.thesis.score}/${report.thesis.max}`, report.thesis.detail],
+    ['论证逻辑', `${report.argument.score}/${report.argument.max}`, report.argument.detail],
+    ['论据新旧', `${report.material.score}/${report.material.max}`, report.material.detail],
+    ['语言表达', `${report.language.score}/${report.language.max}`, report.language.detail],
+    ['结构章法', `${report.structure.score}/${report.structure.max}`, report.structure.detail],
+    ['书写规范（OCR）', `${report.handwriting.score}/${report.handwriting.max}`, report.handwriting.detail]
+  ];
+  return rows.map((row) => `
+    <div class="flaw-row">
+      <div class="flaw-row-top"><span>${escapeHtml(row[0])}</span><strong>${escapeHtml(row[1])}</strong></div>
+      <p>${escapeHtml(row[2])}</p>
+    </div>
+  `).join('');
+}
+
+function renderTeacherScoreReport(report, container) {
+  const goodRows = (report.language.goodSentences || []).slice(0, 2).map((sentence) => {
+    const loc = findSentenceLocation(report.draft, sentence);
+    return `<li>${escapeHtml(loc ? `第${loc.paragraphIndex + 1}段“${takeSentencePreview(sentence)}”` : takeSentencePreview(sentence))}</li>`;
+  }).join('');
+  const weakRows = (report.language.weakSentences || []).slice(0, 2).map((sentence) => {
+    const loc = findSentenceLocation(report.draft, sentence);
+    return `<li>${escapeHtml(loc ? `第${loc.paragraphIndex + 1}段“${takeSentencePreview(sentence)}”` : takeSentencePreview(sentence))}</li>`;
+  }).join('');
+  const suggestionRows = (report.suggestions || []).map((item) => `<li>${escapeHtml(item)}</li>`).join('');
+
+  container.innerHTML = `
+    <div class="agent-result-head">
+      <h3>上海模考阅卷报告</h3>
+      <div class="agent-tags">
+        <span class="agent-tag">总分：${report.total70}/70</span>
+        <span class="agent-tag">立意档次：${escapeHtml(report.intent.band)}</span>
+        <span class="agent-tag risk ${normalizeRiskClass(report.offTopic?.riskLevel || '中')}">偏题风险：${escapeHtml(report.offTopic?.riskLevel || '中')}</span>
+      </div>
+    </div>
+    <div class="agent-result-block">
+      <h4>分项得分</h4>
+      <div class="score-grid">${renderTeacherDimensionRows(report)}</div>
+    </div>
+    <div class="agent-result-block">
+      <h4>中心论点与论证方式检查</h4>
+      <p>中心论点：${escapeHtml(report.thesis.thesisSentence ? `第${report.thesis.thesisParagraph + 1}段“${takeSentencePreview(report.thesis.thesisSentence, 24)}”` : '开头两段未稳定立论')}</p>
+      <p>引证：${report.argument.quoteCount > 0 ? `有 ${report.argument.quoteCount} 处` : '未见明显引证'} ｜ 例证：${report.argument.exampleCount > 0 ? `有 ${report.argument.exampleCount} 处` : '未见明显例证'} ｜ 比喻论证：${report.argument.metaphorCount > 0 ? `有 ${report.argument.metaphorCount} 处` : '未见明显比喻论证'}</p>
+    </div>
+    <div class="agent-result-block">
+      <h4>语言与结构提醒</h4>
+      <p><strong>可保留句</strong></p>
+      <ul>${goodRows || '<li>暂未识别出可直接保留的亮句。</li>'}</ul>
+      <p><strong>优先自改句</strong></p>
+      <ul>${weakRows || '<li>暂未识别出明显病句，但仍建议逐段压短句子。</li>'}</ul>
+    </div>
+    <div class="agent-result-block">
+      <h4>80字点评</h4>
+      <p>${escapeHtml(report.comment80)}</p>
+    </div>
+    <div class="agent-result-block">
+      <h4>3条修改建议</h4>
+      <ul>${suggestionRows}</ul>
+      <p class="agent-para-issues">这里只指出问题和修改任务，不替孩子改写正文。</p>
+    </div>
+  `;
+}
+
+function renderTeacherCritiqueReport(report, container) {
+  const paragraphRows = (report.paragraphRows || []).map((row) => {
+    const lead = takeSentencePreview((splitSentences(splitParagraphs(report.draft)[row.index] || '')[0] || ''), 22);
+    return `
+      <div class="flaw-row">
+        <div class="flaw-row-top"><span>第${row.index + 1}段</span><strong>${row.score}/100</strong></div>
+        <p><strong>定位句</strong>：${escapeHtml(lead || '本段开头未成句')}</p>
+        <p><strong>问题</strong>：${escapeHtml(row.issue)}</p>
+        <p><strong>学生自改方向</strong>：${escapeHtml(row.suggestion)}</p>
+      </div>
+    `;
+  }).join('');
+  const suggestionRows = (report.suggestions || []).map((item) => `<li>${escapeHtml(item)}</li>`).join('');
+
+  container.innerHTML = `
+    <div class="agent-result-head">
+      <h3>阅卷老师精批</h3>
+      <div class="agent-tags">
+        <span class="agent-tag">总分：${report.total70}/70</span>
+        <span class="agent-tag">立意档次：${escapeHtml(report.intent.band)}</span>
+        <span class="agent-tag">书写项：${report.handwriting.score}/${report.handwriting.max}</span>
+      </div>
+    </div>
+    <div class="agent-result-block">
+      <h4>总评</h4>
+      <p>${escapeHtml(report.comment80)}</p>
+      <p>材料核心：${escapeHtml(report.intent.detail)}</p>
+    </div>
+    <div class="agent-result-block">
+      <h4>分项得分</h4>
+      <div class="score-grid">${renderTeacherDimensionRows(report)}</div>
+    </div>
+    <div class="agent-result-block">
+      <h4>逐段指出问题</h4>
+      ${paragraphRows || '<p>暂无逐段问题定位。</p>'}
+    </div>
+    <div class="agent-result-block">
+      <h4>修改任务单</h4>
+      <ul>${suggestionRows}</ul>
+      <p class="agent-para-issues">AI只指出问题，正文请学生自己改。</p>
+    </div>
+  `;
+}
+
+function renderRevisionTaskList(report, container) {
+  const suggestionRows = (report.suggestions || []).map((item, index) => `<li><strong>任务${index + 1}</strong>：${escapeHtml(item)}</li>`).join('');
+  const paragraphRows = (report.paragraphRows || []).map((row) => `
+    <div class="flaw-row">
+      <div class="flaw-row-top"><span>第${row.paragraph}段</span><strong>${row.score}/100</strong></div>
+      <p><strong>要处理的问题</strong>：${escapeHtml((row.issues || []).join('、') || '本段暂无明显硬伤')}</p>
+      <p><strong>自己修改时先看</strong>：${escapeHtml(row.suggestion || '先核对题眼是否回扣，再补机制解释。')}</p>
+    </div>
+  `).join('');
+  container.innerHTML = `
+    <div class="agent-result-head">
+      <h3>修改任务单</h3>
+      <div class="agent-tags">
+        <span class="agent-tag">总分：${report.total70}/70</span>
+        <span class="agent-tag">立意档次：${escapeHtml(report.intent.band)}</span>
+      </div>
+    </div>
+    <div class="agent-result-block">
+      <h4>总提醒</h4>
+      <p>${escapeHtml(report.comment80)}</p>
+    </div>
+    <div class="agent-result-block">
+      <h4>本次只做这3件事</h4>
+      <ol>${suggestionRows || '<li>先把中心论点写成一句完整判断，再检查每段是否回扣题眼。</li>'}</ol>
+    </div>
+    <div class="agent-result-block">
+      <h4>逐段自改任务</h4>
+      ${paragraphRows || '<p>当前未识别出逐段任务。</p>'}
+      <p class="agent-para-issues">这里只列任务，不替孩子改正文。改，由学生自己完成。</p>
+    </div>
+  `;
+}
+
 function detectLectureTone(draft) {
   const metaCount = countMatches(draft, /(先看第一层|进一步看|回到题目|从备考角度看|这就要求写作者|高质量作文|写作者|本文讨论的核心是|如果说上一层|这一层要回答的便是)/g);
   const score = clamp(100 - metaCount * 18, 0, 100);
@@ -3456,7 +4275,7 @@ function buildCritiqueProblems(score, lectureTone) {
   return dedupeArray(problems).slice(0, 5);
 }
 
-function buildCritiquePromotionPlan(score, analysis, lectureTone) {
+function buildCritiquePromotionPlan(score, analysis, lectureTone, methodGuidedKit) {
   const nextTarget = score.score70 >= 63 ? '稳住63+并继续抬升上限' : (score.score70 >= 56 ? '从56+冲到63+' : '先稳定到56+');
   const topicKey = analysis.topicPhrases?.[0] || '题眼';
   const steps = [
@@ -3469,7 +4288,11 @@ function buildCritiquePromotionPlan(score, analysis, lectureTone) {
   } else {
     steps.push('第四步统一语势：把散点好句收拢成稳定的卷面语言。');
   }
-  return { target: nextTarget, steps: steps.slice(0, 4) };
+  const methodStep = methodGuidedKit?.critiqueActions?.[0];
+  if (methodStep) {
+    steps.push(`第五步按方法论复盘：${methodStep}`);
+  }
+  return { target: nextTarget, steps: steps.slice(0, 5) };
 }
 
 function buildCritiqueParagraphRows(score) {
@@ -3495,28 +4318,37 @@ function buildMasterCritiqueReport(topic, draft) {
   const analysis = analyzeEssayTopic(topic);
   const sentenceQuality = analyzeSentenceQuality(topic, draft, score.offTopic?.topicPhrases || analysis.topicPhrases || []);
   const lectureTone = detectLectureTone(draft);
+  const methodGuidedKit = analysis.methodGuidedKit || buildMethodGuidedKit(topic, analysis.topicType, analysis.topicPhrases || []);
   return {
     topic,
     draft,
     score,
     analysis,
+    methodGuidedKit,
     sentenceQuality,
     lectureTone,
     summary: buildCritiqueTeacherSummary(score, analysis, lectureTone),
     strengths: buildCritiqueStrengths(score, sentenceQuality),
     problems: buildCritiqueProblems(score, lectureTone),
     paragraphRows: buildCritiqueParagraphRows(score),
-    promotionPlan: buildCritiquePromotionPlan(score, analysis, lectureTone)
+    promotionPlan: buildCritiquePromotionPlan(score, analysis, lectureTone, methodGuidedKit)
   };
 }
 
 function renderMasterCritiqueReport(report, container) {
-  const { score, lectureTone, sentenceQuality, summary, strengths, problems, paragraphRows, promotionPlan, analysis } = report;
+  const { score, lectureTone, sentenceQuality, summary, strengths, problems, paragraphRows, promotionPlan, analysis, methodGuidedKit } = report;
   const strengthRows = strengths.map((x) => `<li>${escapeHtml(x)}</li>`).join('');
   const problemRows = problems.map((x) => `<li>${escapeHtml(x)}</li>`).join('');
   const goodRows = (sentenceQuality.good || []).map((x) => `<li class="sentence-good">${escapeHtml(x)}</li>`).join('');
   const badRows = (sentenceQuality.bad || []).map((x) => `<li class="sentence-bad">${escapeHtml(x)}</li>`).join('');
   const promotionRows = (promotionPlan.steps || []).map((x) => `<li>${escapeHtml(x)}</li>`).join('');
+  const methodRows = (methodGuidedKit?.notes || []).map((note) => `
+    <div class="flaw-row">
+      <div class="flaw-row-top"><span>${escapeHtml(note.title)}</span><strong>${escapeHtml(note.source || '')}</strong></div>
+      <p>${escapeHtml(note.focus || '')}</p>
+    </div>
+  `).join('');
+  const methodActionRows = (methodGuidedKit?.critiqueActions || []).map((x) => `<li>${escapeHtml(x)}</li>`).join('');
   const paraRows = paragraphRows.length
     ? paragraphRows.map((item) => `
       <div class="flaw-row">
@@ -3525,8 +4357,7 @@ function renderMasterCritiqueReport(report, container) {
         <p><strong>当前问题</strong>：${escapeHtml((item.issues || []).join('、') || '本段基础较稳')}</p>
         <p><strong>升档动作</strong>：${escapeHtml(item.suggestion)}</p>
         <div class="flaw-actions">
-          <span class="flaw-target">目标：把这一段推向更像一类卷的写法</span>
-          <button class="agent-btn ghost paragraph-rewrite-btn" type="button" data-report-type="score" data-paragraph-index="${item.index}">一键改写本段</button>
+          <span class="flaw-target">目标：把这一段推向更像一类卷的写法；请学生自己重写。</span>
         </div>
       </div>
     `).join('')
@@ -3555,6 +4386,11 @@ function renderMasterCritiqueReport(report, container) {
       <ul>${problemRows || '<li>当前未识别出显著问题。</li>'}</ul>
     </div>
     <div class="agent-result-block">
+      <h4>按 22-23 方法论看这篇</h4>
+      <div class="score-grid">${methodRows || '<p>当前未命中额外方法论提醒。</p>'}</div>
+      <ul>${methodActionRows || '<li>当前未补出新的方法动作。</li>'}</ul>
+    </div>
+    <div class="agent-result-block">
       <h4>逐段批注</h4>
       ${paraRows}
     </div>
@@ -3569,9 +4405,7 @@ function renderMasterCritiqueReport(report, container) {
       <h4>升档路线</h4>
       <p>当前目标：${escapeHtml(promotionPlan.target)}</p>
       <ul>${promotionRows}</ul>
-      <div class="agent-actions secondary">
-        <button class="agent-btn primary apply-score-boost-btn" type="button">按精批意见一键提分改写</button>
-      </div>
+      <p class="agent-para-issues">以上路线只用于指出问题，不替学生改写正文。</p>
     </div>
   `;
 }
@@ -3595,10 +4429,10 @@ function renderScoreReport(report, container) {
     <div class="agent-result-head"><h3>上海作文维度评分报告</h3><div class="agent-tags"><span class="agent-tag">总分：${report.total}/100</span><span class="agent-tag">折算：${report.score70}/70</span><span class="agent-tag">分档：${escapeHtml(report.level)}</span><span class="agent-tag risk ${normalizeRiskClass(report.offTopic.riskLevel)}">偏题风险：${escapeHtml(report.offTopic.riskLevel)}</span></div></div>
     <div class="agent-result-block"><h4>分维度得分</h4><div class="score-grid">${rows}</div></div>
     <div class="agent-result-block"><h4>文本统计</h4><p>字数：${report.stats.wordCount} ｜ 句子：${report.stats.sentenceCount} ｜ 段落：${report.stats.paragraphCount}</p></div>
-    <div class="agent-result-block"><h4>提分动作</h4><ul>${actions}${boostActions}</ul><div class="agent-actions secondary"><button class="agent-btn primary apply-score-boost-btn" type="button">按提分动作一键改写</button></div></div>
+    <div class="agent-result-block"><h4>提分动作</h4><ul>${actions}${boostActions}</ul><p class="agent-para-issues">这里只列提分动作，请学生自己改。</p></div>
     <div class="agent-result-block"><h4>错因本（当前草稿）</h4><div class="agent-tags">${currentErrorTags || '<span class="agent-tag">当前未识别明显高频错因</span>'}</div><p>已累计记录：${errorBook.total}次</p></div>
     <div class="agent-result-block"><h4>高频错因专项训练</h4><ul>${topErrorRows || '<li>暂未形成高频错因画像</li>'}</ul><p>最近记录</p><ul>${recentErrorRows || '<li>暂无错因记录</li>'}</ul></div>
-    <div class="agent-result-block"><h4>段落级诊断与一键改写</h4>${paragraphAdviceRows}</div>
+    <div class="agent-result-block"><h4>段落级诊断</h4>${paragraphAdviceRows}</div>
     <div class="agent-result-block"><h4>薄弱维度专项训练（已累计${weakPlan.count}次评分）</h4><ul>${weakRows || '<li>暂无训练建议</li>'}</ul></div>`;
 }
 
@@ -3720,11 +4554,14 @@ function renderScoreBoostReport(boost, container) {
   `;
 }
 
-function runBaselineHealthCheck() {
+async function runBaselineHealthCheck() {
   const checks = [];
   const requiredIds = [
     'essayTopicInput',
     'essayDraftInput',
+    'handwritingImageInput',
+    'clearHandwritingImageBtn',
+    'handwritingPreviewList',
     'analyzeTopicBtn',
     'generateFullEssayBtn',
     'generateTieredEssayBtn',
@@ -3753,7 +4590,8 @@ function runBaselineHealthCheck() {
     'analyzeEssayTopic',
     'runOffTopicCheck',
     'scoreEssayDraft',
-    'quickGenerateEssay'
+    'quickGenerateEssay',
+    'buildShanghaiTeacherReviewReport'
   ];
   const missingFns = functionMap.filter((fn) => typeof window[fn] !== 'function');
   checks.push({
@@ -3786,7 +4624,7 @@ function runBaselineHealthCheck() {
 
   const featureCheck = runFeatureFlowChecks();
   checks.push(...featureCheck);
-  const regression = runRegressionSuite();
+  const regression = await runRegressionSuite();
   checks.push({
     name: '回归测试样例',
     ok: regression.passed === regression.total,
@@ -3940,10 +4778,24 @@ function runFeatureFlowChecks() {
     checks.push({ name: '上海范例训练库', ok: false, detail: `异常：${err?.message || '未知错误'}` });
   }
 
+  try {
+    const input = document.getElementById('handwritingImageInput');
+    const preview = document.getElementById('handwritingPreviewList');
+    const status = document.getElementById('handwritingOcrStatus');
+    const ok = !!input && !!preview && !!status;
+    checks.push({
+      name: '手写OCR上传区',
+      ok,
+      detail: ok ? '图片上传、状态提示与预览区已接入' : '手写OCR上传区元素不完整'
+    });
+  } catch (err) {
+    checks.push({ name: '手写OCR上传区', ok: false, detail: `异常：${err?.message || '未知错误'}` });
+  }
+
   return checks;
 }
 
-function runRegressionSuite() {
+async function runRegressionSuite() {
   const cases = [];
 
   try {
@@ -3968,14 +4820,14 @@ function runRegressionSuite() {
   try {
     const topic = '有人担忧，有人觉得正常，你有怎样的思考？';
     const poor = '我认为这个问题很重要。我们应该重视它。生活中有很多类似现象，所以值得思考。';
-    const boosted = applyScoreBoostRewrite(topic, poor);
+    const teacherReport = await buildShanghaiTeacherReviewReport(topic, poor);
     cases.push({
-      name: '一键提分不反向下滑',
-      ok: boosted.after.total >= boosted.before.total,
-      detail: `改写前 ${boosted.before.total} / 改写后 ${boosted.after.total}`
+      name: '老师评分报告可生成',
+      ok: teacherReport.total70 >= 0 && (teacherReport.suggestions || []).length === 3,
+      detail: `总分 ${teacherReport.total70}/70，建议 ${(teacherReport.suggestions || []).length} 条`
     });
   } catch (err) {
-    cases.push({ name: '一键提分不反向下滑', ok: false, detail: `异常：${err?.message || '未知错误'}` });
+    cases.push({ name: '老师评分报告可生成', ok: false, detail: `异常：${err?.message || '未知错误'}` });
   }
 
   try {
@@ -3997,6 +4849,17 @@ function runRegressionSuite() {
     cases.push({ name: '范例驱动题目解读', ok, detail: ok ? '分析已命中创新母题并提升中心立意' : '分析未正确吃到范例母题' });
   } catch (err) {
     cases.push({ name: '范例驱动题目解读', ok: false, detail: `异常：${err?.message || '未知错误'}` });
+  }
+
+  try {
+    const topic = '在观点越来越多元的世界里，是否只有坚持自我，才能获得理想的人生？';
+    const analysis = analyzeEssayTopic(topic);
+    const ok = Array.isArray(analysis.methodGuidedKit?.analysisActions)
+      && analysis.methodGuidedKit.analysisActions.length >= 2
+      && /隐含关系|现实锚点|旧题资源/.test((analysis.methodGuidedKit.analysisActions || []).join(''));
+    cases.push({ name: '22-23方法论接入分析', ok, detail: ok ? '分析结果已补入方法论动作' : '方法论提醒未正常接入分析链路' });
+  } catch (err) {
+    cases.push({ name: '22-23方法论接入分析', ok: false, detail: `异常：${err?.message || '未知错误'}` });
   }
 
   try {

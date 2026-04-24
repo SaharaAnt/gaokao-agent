@@ -162,6 +162,25 @@ body {
 .material-card-main span { color: #64748b; font-size: 13px; line-height: 1.5; }
 .material-card-actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
 
+.handwriting-panel { margin-top: 14px; border: 1px solid var(--line); border-radius: 14px; padding: 12px; background: rgba(255, 255, 255, 0.78); }
+.handwriting-panel-head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
+.handwriting-status-badge { border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px; font-size: 12px; color: #466392; background: rgba(224, 242, 254, 0.65); white-space: nowrap; }
+.handwriting-status-badge.ready { color: #0369a1; border-color: rgba(14, 165, 233, 0.45); background: rgba(224, 242, 254, 0.92); }
+.handwriting-status-badge.loading { color: #b45309; border-color: rgba(245, 158, 11, 0.45); background: rgba(254, 240, 138, 0.75); }
+.handwriting-status-badge.done { color: #047857; border-color: rgba(16, 185, 129, 0.45); background: rgba(220, 252, 231, 0.88); }
+.handwriting-status-badge.error { color: #b91c1c; border-color: rgba(239, 68, 68, 0.45); background: rgba(254, 226, 226, 0.92); }
+.handwriting-upload-row { display: flex; gap: 10px; align-items: center; margin-top: 10px; flex-wrap: wrap; }
+.handwriting-upload-row input[type="file"] { padding: 8px 10px; }
+.handwriting-ocr-status { margin: 10px 0 0; color: #466392; font-size: 13px; line-height: 1.6; }
+.handwriting-ocr-status.loading { color: #b45309; }
+.handwriting-ocr-status.done { color: #047857; }
+.handwriting-ocr-status.error { color: #b91c1c; }
+.handwriting-preview-list { margin-top: 10px; display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.handwriting-empty { border: 1px dashed rgba(14, 165, 233, 0.35); border-radius: 12px; padding: 14px; color: #64748b; background: rgba(255, 255, 255, 0.78); }
+.handwriting-preview-card { border: 1px solid var(--line); border-radius: 12px; padding: 8px; background: rgba(255, 255, 255, 0.9); display: grid; gap: 8px; }
+.handwriting-preview-card img { width: 100%; aspect-ratio: 3 / 4; object-fit: cover; border-radius: 10px; border: 1px solid rgba(148, 163, 184, 0.3); background: #fff; }
+.handwriting-preview-meta { color: #466392; font-size: 12px; line-height: 1.5; word-break: break-all; }
+
 .exam-mode-panel { margin-top: 14px; border: 1px solid var(--line); border-radius: 14px; padding: 10px; background: rgba(255, 255, 255, 0.72); }
 .exam-mode-header { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 .exam-mode-header h3 { margin: 0; font-size: 16px; }
@@ -275,6 +294,7 @@ body {
   .evo-bottom { grid-template-columns: 1fr; }
   .week-bar-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .tier-essay-paragraph-row { grid-template-columns: 1fr; }
+  .handwriting-panel-head { flex-direction: column; }
 }
 @media (max-width: 640px) {
   .hero-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
