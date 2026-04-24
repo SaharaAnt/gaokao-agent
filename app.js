@@ -292,6 +292,7 @@ function initAgentWorkbench() {
   const copyBtn = document.getElementById('copyAgentResultBtn');
   const offTopicCheckBtn = document.getElementById('offTopicCheckBtn');
   const scoreDraftBtn = document.getElementById('scoreDraftBtn');
+  const masterCritiqueBtn = document.getElementById('masterCritiqueBtn');
   const improveDraftBtn = document.getElementById('improveDraftBtn');
   const weeklyDashboardBtn = document.getElementById('weeklyDashboardBtn');
   const regressionTestBtn = document.getElementById('regressionTestBtn');
@@ -380,6 +381,24 @@ function initAgentWorkbench() {
     });
     recordErrorBookEntry({ topic, draft, score, offTopic: score.offTopic, source: 'score' });
     renderScoreReport(score, resultContainer);
+  });
+
+  masterCritiqueBtn?.addEventListener('click', () => {
+    const topic = topicInput.value.trim();
+    const draft = draftInput.value.trim();
+    if (!topic) return void (resultContainer.innerHTML = '<p class="agent-empty">请先输入作文题目。</p>');
+    if (!draft) return void (resultContainer.innerHTML = '<p class="agent-empty">请先粘贴作文草稿。</p>');
+    const report = buildMasterCritiqueReport(topic, draft);
+    updateTrainingStats(report.score.dimensions, {
+      topic,
+      total: report.score.total,
+      score70: report.score.score70,
+      riskLevel: report.score.offTopic?.riskLevel || '中',
+      source: 'critique',
+      topicType: detectTopicType(topic).name
+    });
+    recordErrorBookEntry({ topic, draft, score: report.score, offTopic: report.score.offTopic, source: 'critique' });
+    renderMasterCritiqueReport(report, resultContainer);
   });
 
   improveDraftBtn?.addEventListener('click', () => {
@@ -1754,9 +1773,163 @@ function buildDeclutterEssayTemplateFromExample(topic, analysis, exampleCard, ca
   ];
 }
 
+function buildInnovationSynthesisEssayTemplateFromExample(topic, analysis, exampleCard, casePool) {
+  const material = (casePool === 'examplelib' || casePool === 'auto')
+    ? materialFromTrainingExampleCard(exampleCard)
+    : pickCaseMaterial(casePool, analysis.topicType?.code || 'problem', topic);
+  const thesis = exampleCard?.thesis || analysis.thesis || '对已有知识的综合未必天然就是创新，关键看是否产生新的解释力。';
+  const golden = (exampleCard?.goldenSentences || []).filter(Boolean);
+  return [
+    composeEssayParagraph([
+      '几乎所有创新都离不开前人积累，这一点似乎已成为常识',
+      '也正因此，当题目追问“对已有知识的综合，是创新吗”时，真正要辨析的便不是“创新能否借旧而生”，而是怎样的综合仍只是整理，怎样的综合已经通向创造',
+      '若把综合简单理解为拼接，把创新简单理解为凭空而来，文章都会失准',
+      thesis
+    ]),
+    composeEssayParagraph([
+      '先说为什么这个问题值得追问',
+      '无论科学研究、艺术创作，还是现实中的制度设计，几乎都建立在既有知识之上',
+      '人不可能在真空中思考，创新也不可能脱离传统突然降临',
+      '从这个意义上说，综合已有知识不是创新的对立面，而常常是创新发生的前提',
+      '然而，前提并不等于结果，借旧而生也并不意味着凡综合皆可称创新'
+    ]),
+    composeEssayParagraph([
+      '因此，判断的关键就在于区分两类综合',
+      '一种是机械拼接：把材料摆在一起，把观点罗列出来，把已有知识重新包装，却没有改变结构，也没有提出新的问题',
+      golden[1] || '把材料堆在一起，不等于建成房屋；把知识拼在一起，也不等于完成创新',
+      '这样的综合当然有整理价值，却仍停留在搬运、复述与归档层面',
+      '另一种则是生成式综合：不同知识在新的结构中发生互相照亮，原本分散的信息因此拥有新的关系，进而生出新的解释力'
+    ]),
+    composeEssayParagraph([
+      '真正的创新，往往就诞生在这种结构重组之中',
+      '科学史上的突破，常不是增加了一堆资料，而是重新组织已有知识，改写了看问题的方式；跨学科研究之所以珍贵，也不在于学科名称叠加，而在于不同方法相遇后提出了旧框架看不见的问题',
+      `放到今天，${material.example || '人工智能高效整合海量信息'}更让这个判断显得迫切`,
+      '如果整合只是更快归纳与输出，那么它仍主要停留在高效处理；只有当整合过程能够推动新的结构形成、提出新的问题意识，它才真正逼近创新'
+    ]),
+    composeEssayParagraph([
+      '这也正是当下最需要警惕的地方',
+      '在信息技术飞速发展的时代，人们很容易把“整合得快”“汇总得全”误当成“创造得深”',
+      '可高效并不自动通向创新，数量也不自动转化为质量',
+      golden[0] || '创新很少从真空中诞生，真正稀缺的，是让旧知识在新的结构中重新发光',
+      `从${material.domain}的现实提醒看，${material.link || '我们比任何时候都更需要辨认“高效整合”与“真实创新”的差别'}`
+    ]),
+    composeEssayParagraph([
+      '所以，我更愿意给出这样的回答：对已有知识的综合，未必天然就是创新，但创新往往必须经过对已有知识的创造性综合',
+      thesis,
+      golden[2] || '衡量综合是否构成创新，不在于它用了多少旧知识，而在于它是否生出了新的解释力',
+      '真正值得珍视的，不是把旧知识重新堆高，而是让它在新的问题与新的结构中，第一次真正发出光来'
+    ])
+  ];
+}
+
+function buildMapCompassEssayTemplateFromExample(topic, analysis, exampleCard, casePool) {
+  const material = (casePool === 'examplelib' || casePool === 'auto')
+    ? materialFromTrainingExampleCard(exampleCard)
+    : pickCaseMaterial(casePool, analysis.topicType?.code || 'relation', topic);
+  const key = analysis.topicPhrases?.[0] || '地图';
+  const key2 = analysis.topicPhrases?.[1] || '指南针';
+  const thesis = exampleCard?.thesis || analysis.thesis || '路径经验与方向意识应协同，而非互相替代。';
+  const golden = (exampleCard?.goldenSentences || []).filter(Boolean);
+  return [
+    composeEssayParagraph([
+      `在前行的路上，${key}与${key2}原本就不是同一种东西`,
+      `${key}指向既有路径、经验积累与抵达效率，${key2}则象征方向感、价值判断与在不确定中自我校准的能力`,
+      '若把题目写成“哪个更重要”的简单比较，便错过了它真正要考查的难点',
+      thesis
+    ]),
+    composeEssayParagraph([
+      `必须承认，在路径清楚、目标明确的情况下，${key}的确常常更有效`,
+      '已有经验可以减少试错，成熟方法可以节省时间，清晰路线也能降低人在复杂任务中的盲目摸索',
+      '无论学习规划、职业训练还是技术实践，人都离不开对既有路径的借鉴',
+      '谁能看清前人的脚印，谁往往就更容易走得稳、走得快',
+      golden[0] || '地图告诉我们怎样走得更快，指南针提醒我们不要走错方向'
+    ]),
+    composeEssayParagraph([
+      `然而，${key}之所以有用，有一个并不该被忽略的前提：路径本身大致可靠`,
+      `一旦处境变得陌生、现实充满岔路，${key}的边界便会显现出来`,
+      '前人留下的路线未必仍适用于今天，熟悉经验也可能只把人带回旧答案',
+      '这时，真正决定一个人会走向何处的，往往不是路线图有多细，而是他心中是否仍有方向坐标'
+    ]),
+    composeEssayParagraph([
+      `所以，${key2}的重要性，恰恰在不确定中显现`,
+      '指南针并不告诉人每一步该怎样迈出，却能告诉人不该朝哪里偏离',
+      '一个人在面对诱惑、捷径与短期功利时，是否仍能守住初心、原则与价值判断，这往往比是否拥有现成路线更能决定命运',
+      golden[1] || '在熟悉的平原上，地图的确高效；可在迷雾与岔路中，决定命运的往往是那枚不偏不倚的指南针',
+      `也正因如此，${material.example || '经验路径一旦失效，方向意识就成为重新出发的支点'}`
+    ]),
+    composeEssayParagraph([
+      '把目光放回当下，这种关系尤其值得重视',
+      '今天的青年面对的并非一条已经铺好的单一路径，而是快速变化的技术环境、竞争结构和人生选项',
+      '在这样的时代里，路径经验当然重要，但若方向错了，再精确的地图也可能把人带往偏离之地',
+      `从${material.domain}的现实提醒看，${material.link || '效率若脱离方向，最终只会把人更快送往错误的终点'}`
+    ]),
+    composeEssayParagraph([
+      `因此，我不赞同把${key}绝对地置于${key2}之上`,
+      thesis,
+      golden[2] || '前行之路既需要路径经验，也需要方向意识；没有方向的效率，不过是更快地偏离',
+      '真正成熟的前行，不是只会沿图赶路，而是在借鉴路径的同时，始终知道自己为何出发、将向何处而去'
+    ])
+  ];
+}
+
+function buildCommonSenseEssayTemplateFromExample(topic, analysis, exampleCard, casePool) {
+  const material = (casePool === 'examplelib' || casePool === 'auto')
+    ? materialFromTrainingExampleCard(exampleCard)
+    : pickCaseMaterial(casePool, analysis.topicType?.code || 'value', topic);
+  const thesis = exampleCard?.thesis || analysis.thesis || '常识是理解世界的重要起点，但不能代替持续检验。';
+  const golden = (exampleCard?.goldenSentences || []).filter(Boolean);
+  return [
+    composeEssayParagraph([
+      '人们往往用常识去看待事物、做出判断，这几乎是一种天然反应',
+      '常识让复杂世界变得可理解，让日常决策不至于每一步都从零开始',
+      '但也正因为它太熟悉、太顺手，人更容易在不自觉中把常识误当成最终答案',
+      thesis
+    ]),
+    composeEssayParagraph([
+      '先承认常识的合理性，是讨论这道题的起点',
+      '所谓常识，本就是长期经验、共同生活与反复实践沉淀下来的判断方式',
+      '它帮助人迅速识别风险，维持基本秩序，也为许多日常决策节省了认知成本',
+      '如果没有常识，个体的生活会变得迟疑，社会的运转也会失去许多最低限度的共识',
+      '因此，轻率贬低常识，本身就是不成熟的姿态'
+    ]),
+    composeEssayParagraph([
+      '然而，常识之所以值得警惕，也恰在于它常常太像正确答案',
+      '它来自经验，却未必适用于一切时代；它帮助判断，却也可能把判断锁死在旧框架中',
+      '当现实情境发生变化，当新技术、新知识、新关系不断出现，原本有效的经验就可能转化为惯性、偏见甚至认知惰性',
+      golden[0] || '常识是人认识世界的门槛，却不是人停止思考的借口'
+    ]),
+    composeEssayParagraph([
+      `这种局限在今天尤其明显，${material.example || '许多网络舆论、健康知识与教育方法'}都在提醒我们：旧常识并不总能应对新问题`,
+      '有人因为“大家一直都这么想”而拒绝事实，有人因为“从前经验如此”而排斥新的证据',
+      '常识若不再接受现实校验，就会从帮助理解世界的工具，变成遮蔽世界的墙',
+      golden[1] || '经验能让判断更快，反思才能让判断更准'
+    ]),
+    composeEssayParagraph([
+      '因此，更稳妥的态度既不是反常识，也不是迷信常识',
+      '真正成熟的判断，应当把常识当作起点，而不是终点；当事实、实践与新知提出修正要求时，人还要有更新常识的勇气',
+      `从${material.domain}的现实提醒看，${material.link || '熟知并非真知，实践才是检验认知可靠性的关键通道'}`
+    ]),
+    composeEssayParagraph([
+      '回到题目，我赞同人们往往借助常识看待事物并作出判断，因为没有任何人能脱离经验而生活',
+      '但我更愿意补上一句：常识若不能不断接受现实校正，便会从基础理性滑向僵化思维',
+      thesis,
+      golden[2] || '真正可靠的理性，不是抛弃常识，而是让常识不断接受现实的校正'
+    ])
+  ];
+}
+
 function buildSpecializedEssayTemplateFromExample(topic, analysis, exampleCard, casePool) {
   if (exampleCard?.id === 'example-declutter-true-self') {
     return buildDeclutterEssayTemplateFromExample(topic, analysis, exampleCard, casePool);
+  }
+  if (exampleCard?.id === 'example-innovation-synthesis') {
+    return buildInnovationSynthesisEssayTemplateFromExample(topic, analysis, exampleCard, casePool);
+  }
+  if (exampleCard?.id === 'example-map-compass') {
+    return buildMapCompassEssayTemplateFromExample(topic, analysis, exampleCard, casePool);
+  }
+  if (exampleCard?.id === 'example-common-sense') {
+    return buildCommonSenseEssayTemplateFromExample(topic, analysis, exampleCard, casePool);
   }
   return null;
 }
@@ -3228,6 +3401,181 @@ function scoreEssayDraft(topic, draft) {
   };
 }
 
+function detectLectureTone(draft) {
+  const metaCount = countMatches(draft, /(先看第一层|进一步看|回到题目|从备考角度看|这就要求写作者|高质量作文|写作者|本文讨论的核心是|如果说上一层|这一层要回答的便是)/g);
+  const score = clamp(100 - metaCount * 18, 0, 100);
+  const detail = metaCount === 0
+    ? '成文腔较稳定，基本没有明显讲评提纲痕迹。'
+    : `检测到${metaCount}处“讲评腔/提纲腔”信号，文章容易像老师分析题，而不像学生在交卷。`;
+  return { score, metaCount, detail };
+}
+
+function buildCritiqueTeacherSummary(score, analysis, lectureTone) {
+  const band = score.score70;
+  const topicKey = analysis.topicPhrases?.[0] || '题眼';
+  if (band >= 63) {
+    return `这篇习作已经具备一类卷的基本气质：扣题较稳，论证有层次，结尾也能回到“${topicKey}”完成收束。接下来真正拉高上限的，不是再堆素材，而是继续统一语势，让每段之间更有牵引感。`;
+  }
+  if (band >= 56) {
+    return `这篇习作已经站上中上档，说明你不是“不会想”，而是“还没完全写透”。目前最大差距通常不在观点，而在成文完成度：机制分析再深一层，边界意识再亮一度，整篇就有机会冲到63+。${lectureTone.metaCount ? '另外，文中仍有一些讲评腔，需要改成自然推进的正式议论文语气。' : ''}`;
+  }
+  return `这篇习作目前还停在基础合格到二类卷之间，说明方向感已有，但文章还没有真正立起来。最关键的问题不是“没观点”，而是观点还没组织成高水平作文：开头定义不够稳，中段分析不够深，结尾收束也偏虚。先把文章写成“像交卷文章”，分数就会明显上来。`;
+}
+
+function buildCritiqueStrengths(score, sentenceQuality) {
+  const topDims = [...(score.dimensions || [])].sort((a, b) => b.score - a.score).slice(0, 2);
+  const strengths = topDims.map((item) => {
+    if (item.label === '审题立意') return `审题立意相对稳定，至少知道文章该围绕什么核心概念展开。`;
+    if (item.label === '结构章法') return '结构感初步具备，段落已经不是完全散乱堆砌。';
+    if (item.label === '论证与材料') return '论证基础尚可，至少能看出你在尝试用例子支撑观点。';
+    if (item.label === '语言表达') return '语言底子不错，部分句子已有上海卷喜欢的判断感。';
+    return '思辨意识已经露头，知道不能只停在表态。';
+  });
+  if ((sentenceQuality.good || []).length) {
+    strengths.push(`文中已有可保留的好句，说明表达不是从零开始，而是需要统一提升。`);
+  }
+  return dedupeArray(strengths).slice(0, 3);
+}
+
+function buildCritiqueProblems(score, lectureTone) {
+  const problems = [];
+  const sorted = [...(score.dimensions || [])].sort((a, b) => a.score - b.score).slice(0, 3);
+  sorted.forEach((item) => {
+    if (item.label === '审题立意') problems.push('立意还不够聚焦，概念边界与题眼回扣需要更稳。');
+    if (item.label === '结构章法') problems.push('结构推进还偏平，段与段之间缺少明显的递进与牵引。');
+    if (item.label === '论证与材料') problems.push('例子与分析之间还没完全咬合，容易出现“举了例但没论透”。');
+    if (item.label === '语言表达') problems.push('表达还不够成文，句子里有说明腔，缺少卷面上的整篇语势。');
+    if (item.label === '思辨深度') problems.push('思辨深度不足，前提、边界与反向检验还没真正写出来。');
+  });
+  (score.offTopic?.flawScan || []).slice(0, 2).forEach((item) => {
+    problems.push(`${item.name}：${item.fix}`);
+  });
+  if (lectureTone.metaCount) {
+    problems.push('文章存在“讲评腔”，像在分析这道题，而不是像学生在正式写这篇文章。');
+  }
+  return dedupeArray(problems).slice(0, 5);
+}
+
+function buildCritiquePromotionPlan(score, analysis, lectureTone) {
+  const nextTarget = score.score70 >= 63 ? '稳住63+并继续抬升上限' : (score.score70 >= 56 ? '从56+冲到63+' : '先稳定到56+');
+  const topicKey = analysis.topicPhrases?.[0] || '题眼';
+  const steps = [
+    `第一步先稳扣题：每段首句都要回到“${topicKey}”，不让段落滑向泛泛而谈。`,
+    '第二步补机制：每个例子后都追问“为什么这个例子支持我的判断”。',
+    '第三步加边界：在倒数第二段或结尾补一句“何时成立、何时失效”。'
+  ];
+  if (lectureTone.metaCount) {
+    steps.push('第四步去讲评腔：删掉“进一步看/回到题目/从备考角度看”这类老师口吻。');
+  } else {
+    steps.push('第四步统一语势：把散点好句收拢成稳定的卷面语言。');
+  }
+  return { target: nextTarget, steps: steps.slice(0, 4) };
+}
+
+function buildCritiqueParagraphRows(score) {
+  const adviceList = score.offTopic?.paragraphAdvice || [];
+  if (!adviceList.length) return [];
+  return adviceList.map((item) => ({
+    index: item.index,
+    score: item.score,
+    level: item.score >= 78 ? '本段较稳' : (item.score >= 60 ? '本段可提档' : '本段是失分点'),
+    comment: item.score >= 78
+      ? '这一段已经能承担应有任务，接下来主要是把语言再压实一些。'
+      : (item.score >= 60
+        ? '这一段方向基本对，但“说透”和“写满”的程度还不够，是最适合提档的位置。'
+        : '这一段目前拖分较明显，问题不只是表达弱，而是题眼、机制或边界没有站稳。'),
+    suggestion: item.suggestion,
+    issues: item.issues || [],
+    rewrite: item.rewrite
+  }));
+}
+
+function buildMasterCritiqueReport(topic, draft) {
+  const score = scoreEssayDraft(topic, draft);
+  const analysis = analyzeEssayTopic(topic);
+  const sentenceQuality = analyzeSentenceQuality(topic, draft, score.offTopic?.topicPhrases || analysis.topicPhrases || []);
+  const lectureTone = detectLectureTone(draft);
+  return {
+    topic,
+    draft,
+    score,
+    analysis,
+    sentenceQuality,
+    lectureTone,
+    summary: buildCritiqueTeacherSummary(score, analysis, lectureTone),
+    strengths: buildCritiqueStrengths(score, sentenceQuality),
+    problems: buildCritiqueProblems(score, lectureTone),
+    paragraphRows: buildCritiqueParagraphRows(score),
+    promotionPlan: buildCritiquePromotionPlan(score, analysis, lectureTone)
+  };
+}
+
+function renderMasterCritiqueReport(report, container) {
+  const { score, lectureTone, sentenceQuality, summary, strengths, problems, paragraphRows, promotionPlan, analysis } = report;
+  const strengthRows = strengths.map((x) => `<li>${escapeHtml(x)}</li>`).join('');
+  const problemRows = problems.map((x) => `<li>${escapeHtml(x)}</li>`).join('');
+  const goodRows = (sentenceQuality.good || []).map((x) => `<li class="sentence-good">${escapeHtml(x)}</li>`).join('');
+  const badRows = (sentenceQuality.bad || []).map((x) => `<li class="sentence-bad">${escapeHtml(x)}</li>`).join('');
+  const promotionRows = (promotionPlan.steps || []).map((x) => `<li>${escapeHtml(x)}</li>`).join('');
+  const paraRows = paragraphRows.length
+    ? paragraphRows.map((item) => `
+      <div class="flaw-row">
+        <div class="flaw-row-top"><span>第${item.index + 1}段｜${escapeHtml(item.level)}</span><strong>${item.score}/100</strong></div>
+        <p><strong>老师批注</strong>：${escapeHtml(item.comment)}</p>
+        <p><strong>当前问题</strong>：${escapeHtml((item.issues || []).join('、') || '本段基础较稳')}</p>
+        <p><strong>升档动作</strong>：${escapeHtml(item.suggestion)}</p>
+        <div class="flaw-actions">
+          <span class="flaw-target">目标：把这一段推向更像一类卷的写法</span>
+          <button class="agent-btn ghost paragraph-rewrite-btn" type="button" data-report-type="score" data-paragraph-index="${item.index}">一键改写本段</button>
+        </div>
+      </div>
+    `).join('')
+    : '<p>暂无逐段批注。</p>';
+  container.innerHTML = `
+    <div class="agent-result-head">
+      <h3>习作精批报告</h3>
+      <div class="agent-tags">
+        <span class="agent-tag">折算：${score.score70}/70</span>
+        <span class="agent-tag">分档：${escapeHtml(score.level)}</span>
+        <span class="agent-tag risk ${normalizeRiskClass(score.offTopic?.riskLevel || '中')}">偏题风险：${escapeHtml(score.offTopic?.riskLevel || '中')}</span>
+        <span class="agent-tag">讲评腔指数：${lectureTone.score}/100</span>
+      </div>
+    </div>
+    <div class="agent-result-block">
+      <h4>总评</h4>
+      <p>${escapeHtml(summary)}</p>
+      <p>当前命中的范例母题：${escapeHtml(analysis.exampleGuidedKit?.anchorCard?.title || '未命中')}</p>
+    </div>
+    <div class="agent-result-block">
+      <h4>这篇习作已经有的优点</h4>
+      <ul>${strengthRows || '<li>暂未识别出稳定优势，需要先把结构站稳。</li>'}</ul>
+    </div>
+    <div class="agent-result-block">
+      <h4>眼下最影响提分的 4 个问题</h4>
+      <ul>${problemRows || '<li>当前未识别出显著问题。</li>'}</ul>
+    </div>
+    <div class="agent-result-block">
+      <h4>逐段批注</h4>
+      ${paraRows}
+    </div>
+    <div class="agent-result-block">
+      <h4>句子层提醒</h4>
+      <p><strong>可保留的好句</strong></p>
+      <ul>${goodRows || '<li>暂无明显高分句，可先把段落逻辑做稳。</li>'}</ul>
+      <p><strong>需要重写的句子</strong></p>
+      <ul>${badRows || '<li>暂无明显低分句。</li>'}</ul>
+    </div>
+    <div class="agent-result-block">
+      <h4>升档路线</h4>
+      <p>当前目标：${escapeHtml(promotionPlan.target)}</p>
+      <ul>${promotionRows}</ul>
+      <div class="agent-actions secondary">
+        <button class="agent-btn primary apply-score-boost-btn" type="button">按精批意见一键提分改写</button>
+      </div>
+    </div>
+  `;
+}
+
 function renderScoreReport(report, container) {
   const rows = report.dimensions.map((x) => `
     <div class="score-row">
@@ -3382,6 +3730,7 @@ function runBaselineHealthCheck() {
     'generateTieredEssayBtn',
     'offTopicCheckBtn',
     'scoreDraftBtn',
+    'masterCritiqueBtn',
     'improveDraftBtn',
     'weeklyDashboardBtn',
     'materialTitleInput',
@@ -3677,6 +4026,36 @@ function runRegressionSuite() {
   }
 
   try {
+    const topic = '有人说，在前行的路上，地图的作用优于指南针。对此你是否认同？';
+    const analysis = analyzeEssayTopic(topic);
+    const essay = generateFullEssayDraft(topic, analysis, 800, 850, { casePool: 'examplelib' });
+    const ok = /地图.*指南针/.test(essay)
+      && /路径|经验/.test(essay)
+      && /方向|价值|原则/.test(essay)
+      && /更快地偏离|走错方向|方向意识/.test(essay)
+      && countWords(essay) >= 800
+      && countWords(essay) <= 850;
+    cases.push({ name: '地图题专属范文', ok, detail: ok ? `已生成关系隐喻题正式成文，字数 ${countWords(essay)}` : `地图题仍偏泛模板，字数 ${countWords(essay)}` });
+  } catch (err) {
+    cases.push({ name: '地图题专属范文', ok: false, detail: `异常：${err?.message || '未知错误'}` });
+  }
+
+  try {
+    const topic = '生活中，人们往往用常识去看待事物，做出判断。对此，你怎么看？';
+    const analysis = analyzeEssayTopic(topic);
+    const essay = generateFullEssayDraft(topic, analysis, 800, 850, { casePool: 'examplelib' });
+    const ok = /常识/.test(essay)
+      && /起点|经验沉淀/.test(essay)
+      && /事实|实践|校正|反思/.test(essay)
+      && /不是反常识，也不是迷信常识|既不是反常识，也不是迷信常识/.test(essay)
+      && countWords(essay) >= 800
+      && countWords(essay) <= 850;
+    cases.push({ name: '常识题专属范文', ok, detail: ok ? `已生成方法判断题正式成文，字数 ${countWords(essay)}` : `常识题仍偏泛模板，字数 ${countWords(essay)}` });
+  } catch (err) {
+    cases.push({ name: '常识题专属范文', ok: false, detail: `异常：${err?.message || '未知错误'}` });
+  }
+
+  try {
     const topic = '生活中，人们往往用常识去看待事物，做出判断。对此，你怎么看？';
     const analysis = analyzeEssayTopic(topic);
     const tiers = generateTieredEssaySet(topic, analysis, { casePool: 'examplelib' });
@@ -3713,6 +4092,19 @@ function runRegressionSuite() {
     cases.push({ name: '段落级一键改写', ok, detail: ok ? '可完成整段替换' : '未能生成有效改写' });
   } catch (err) {
     cases.push({ name: '段落级一键改写', ok: false, detail: `异常：${err?.message || '未知错误'}` });
+  }
+
+  try {
+    const topic = '生活中，人们往往用常识去看待事物，做出判断。对此，你怎么看？';
+    const draft = '我觉得常识很重要。大家一般都会这样想，所以常识应该一直被遵守。\n\n比如很多人都觉得经验很重要，所以常识一定是对的。\n\n总之我们要相信常识。';
+    const report = buildMasterCritiqueReport(topic, draft);
+    const ok = !!report.summary
+      && Array.isArray(report.paragraphRows)
+      && report.paragraphRows.length >= 3
+      && /习作/.test(report.summary) === false;
+    cases.push({ name: '习作精批报告', ok, detail: ok ? `可生成总评与${report.paragraphRows.length}段逐段批注` : '精批报告结构不完整' });
+  } catch (err) {
+    cases.push({ name: '习作精批报告', ok: false, detail: `异常：${err?.message || '未知错误'}` });
   }
 
   try {
