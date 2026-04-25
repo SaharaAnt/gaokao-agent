@@ -996,66 +996,78 @@ function initAgentWorkbench() {
   });
 
   scoreDraftBtn?.addEventListener('click', async () => {
-    const topic = topicInput.value.trim();
-    if (!topic) return void (resultContainer.innerHTML = '<p class="agent-empty">请先输入作文题目。</p>');
-    const draftState = await resolveDraftFromInputOrHandwriting(draftInput, examWordCount, resultContainer, '草稿评分');
-    const draft = draftState.draft.trim();
-    if (!draft) return void (resultContainer.innerHTML = `<p class="agent-empty">${draftState.fromOcr ? '手写图片已识别，但暂未成功提取出可用正文，请换一张更清晰、更平整的照片再试。' : '请先粘贴作文草稿。'}</p>`);
-    const hasHandwriting = HANDWRITING_SCAN_STATE.pages.length > 0;
-    resultContainer.innerHTML = `<p class="agent-empty">${hasHandwriting ? `${draftState.fromOcr ? '已自动回填手写正文，' : ''}检测到${HANDWRITING_SCAN_STATE.pages.length}张手写图片，正在自动OCR识别并生成上海模考阅卷报告，请稍候...` : '正在生成上海模考阅卷报告，请稍候...'}</p>`;
-    const legacyScore = scoreEssayDraft(topic, draft);
-    const precomputedHandwriting = hasHandwriting ? await assessHandwritingByOCR(draft) : null;
-    if (hasHandwriting) {
-      resultContainer.innerHTML = `<p class="agent-empty">${draftState.fromOcr ? '手写正文已自动写入草稿框，' : ''}手写图片识别已完成，正在整理上海模考阅卷报告...</p>`;
+    try {
+      const topic = topicInput.value.trim();
+      if (!topic) return void (resultContainer.innerHTML = '<p class="agent-empty">请先输入作文题目。</p>');
+      const draftState = await resolveDraftFromInputOrHandwriting(draftInput, examWordCount, resultContainer, '草稿评分');
+      const draft = draftState.draft.trim();
+      if (!draft) return void (resultContainer.innerHTML = `<p class="agent-empty">${draftState.fromOcr ? '手写图片已识别，但暂未成功提取出可用正文，请换一张更清晰、更平整的照片再试。' : '请先粘贴作文草稿。'}</p>`);
+      const hasHandwriting = HANDWRITING_SCAN_STATE.pages.length > 0;
+      resultContainer.innerHTML = `<p class="agent-empty">${hasHandwriting ? `${draftState.fromOcr ? '已自动回填手写正文，' : ''}检测到${HANDWRITING_SCAN_STATE.pages.length}张手写图片，正在自动OCR识别并生成上海模考阅卷报告，请稍候...` : '正在生成上海模考阅卷报告，请稍候...'}</p>`;
+      const legacyScore = scoreEssayDraft(topic, draft);
+      const precomputedHandwriting = hasHandwriting ? await assessHandwritingByOCR(draft) : null;
+      if (hasHandwriting) {
+        resultContainer.innerHTML = `<p class="agent-empty">${draftState.fromOcr ? '手写正文已自动写入草稿框，' : ''}手写图片识别已完成，正在整理上海模考阅卷报告...</p>`;
+      }
+      const report = await buildShanghaiTeacherReviewReport(topic, draft, { precomputedHandwriting });
+      updateTrainingStats(legacyScore.dimensions, {
+        topic,
+        total: legacyScore.total,
+        score70: legacyScore.score70,
+        riskLevel: legacyScore.offTopic?.riskLevel || '中',
+        source: 'score',
+        topicType: detectTopicType(topic).name
+      });
+      recordErrorBookEntry({ topic, draft, score: legacyScore, offTopic: legacyScore.offTopic, source: 'score' });
+      renderTeacherScoreReport(report, resultContainer);
+    } catch (error) {
+      renderWorkbenchActionError(resultContainer, '草稿评分失败', error);
     }
-    const report = await buildShanghaiTeacherReviewReport(topic, draft, { precomputedHandwriting });
-    updateTrainingStats(legacyScore.dimensions, {
-      topic,
-      total: legacyScore.total,
-      score70: legacyScore.score70,
-      riskLevel: legacyScore.offTopic?.riskLevel || '中',
-      source: 'score',
-      topicType: detectTopicType(topic).name
-    });
-    recordErrorBookEntry({ topic, draft, score: legacyScore, offTopic: legacyScore.offTopic, source: 'score' });
-    renderTeacherScoreReport(report, resultContainer);
   });
 
   masterCritiqueBtn?.addEventListener('click', async () => {
-    const topic = topicInput.value.trim();
-    if (!topic) return void (resultContainer.innerHTML = '<p class="agent-empty">请先输入作文题目。</p>');
-    const draftState = await resolveDraftFromInputOrHandwriting(draftInput, examWordCount, resultContainer, '习作精批');
-    const draft = draftState.draft.trim();
-    if (!draft) return void (resultContainer.innerHTML = `<p class="agent-empty">${draftState.fromOcr ? '手写图片已识别，但暂未成功提取出可用正文，请换一张更清晰、正向拍摄的照片再试。' : '请先粘贴作文草稿。'}</p>`);
-    const hasHandwriting = HANDWRITING_SCAN_STATE.pages.length > 0;
-    resultContainer.innerHTML = `<p class="agent-empty">${hasHandwriting ? `${draftState.fromOcr ? '已自动回填手写正文，' : ''}检测到${HANDWRITING_SCAN_STATE.pages.length}张手写图片，正在自动OCR识别并生成老师式逐段精批，请稍候...` : '正在生成老师式逐段精批，请稍候...'}</p>`;
-    const legacyReport = buildMasterCritiqueReport(topic, draft);
-    const precomputedHandwriting = hasHandwriting ? await assessHandwritingByOCR(draft) : null;
-    if (hasHandwriting) {
-      resultContainer.innerHTML = `<p class="agent-empty">${draftState.fromOcr ? '手写正文已自动写入草稿框，' : ''}手写图片识别已完成，正在整理老师式逐段精批...</p>`;
+    try {
+      const topic = topicInput.value.trim();
+      if (!topic) return void (resultContainer.innerHTML = '<p class="agent-empty">请先输入作文题目。</p>');
+      const draftState = await resolveDraftFromInputOrHandwriting(draftInput, examWordCount, resultContainer, '习作精批');
+      const draft = draftState.draft.trim();
+      if (!draft) return void (resultContainer.innerHTML = `<p class="agent-empty">${draftState.fromOcr ? '手写图片已识别，但暂未成功提取出可用正文，请换一张更清晰、正向拍摄的照片再试。' : '请先粘贴作文草稿。'}</p>`);
+      const hasHandwriting = HANDWRITING_SCAN_STATE.pages.length > 0;
+      resultContainer.innerHTML = `<p class="agent-empty">${hasHandwriting ? `${draftState.fromOcr ? '已自动回填手写正文，' : ''}检测到${HANDWRITING_SCAN_STATE.pages.length}张手写图片，正在自动OCR识别并生成老师式逐段精批，请稍候...` : '正在生成老师式逐段精批，请稍候...'}</p>`;
+      const legacyReport = buildMasterCritiqueReport(topic, draft);
+      const precomputedHandwriting = hasHandwriting ? await assessHandwritingByOCR(draft) : null;
+      if (hasHandwriting) {
+        resultContainer.innerHTML = `<p class="agent-empty">${draftState.fromOcr ? '手写正文已自动写入草稿框，' : ''}手写图片识别已完成，正在整理老师式逐段精批...</p>`;
+      }
+      const teacherReport = await buildShanghaiTeacherReviewReport(topic, draft, { precomputedHandwriting });
+      updateTrainingStats(legacyReport.score.dimensions, {
+        topic,
+        total: legacyReport.score.total,
+        score70: legacyReport.score.score70,
+        riskLevel: legacyReport.score.offTopic?.riskLevel || '中',
+        source: 'critique',
+        topicType: detectTopicType(topic).name
+      });
+      recordErrorBookEntry({ topic, draft, score: legacyReport.score, offTopic: legacyReport.score.offTopic, source: 'critique' });
+      renderTeacherCritiqueReport(teacherReport, resultContainer);
+    } catch (error) {
+      renderWorkbenchActionError(resultContainer, '习作精批失败', error);
     }
-    const teacherReport = await buildShanghaiTeacherReviewReport(topic, draft, { precomputedHandwriting });
-    updateTrainingStats(legacyReport.score.dimensions, {
-      topic,
-      total: legacyReport.score.total,
-      score70: legacyReport.score.score70,
-      riskLevel: legacyReport.score.offTopic?.riskLevel || '中',
-      source: 'critique',
-      topicType: detectTopicType(topic).name
-    });
-    recordErrorBookEntry({ topic, draft, score: legacyReport.score, offTopic: legacyReport.score.offTopic, source: 'critique' });
-    renderTeacherCritiqueReport(teacherReport, resultContainer);
   });
 
   improveDraftBtn?.addEventListener('click', async () => {
-    const topic = topicInput.value.trim();
-    if (!topic) return void (resultContainer.innerHTML = '<p class="agent-empty">请先输入作文题目。</p>');
-    const draftState = await resolveDraftFromInputOrHandwriting(draftInput, examWordCount, resultContainer, '修改任务单');
-    const draft = draftState.draft.trim();
-    if (!draft) return void (resultContainer.innerHTML = `<p class="agent-empty">${draftState.fromOcr ? '手写图片已识别，但暂未成功提取出可用正文，请换一张更清晰的照片再试。' : '请先粘贴作文草稿。'}</p>`);
-    resultContainer.innerHTML = `<p class="agent-empty">${draftState.fromOcr ? '已自动回填手写正文，' : ''}正在整理修改任务单，请稍候...</p>`;
-    const teacherReport = await buildShanghaiTeacherReviewReport(topic, draft);
-    renderRevisionTaskList(teacherReport, resultContainer);
+    try {
+      const topic = topicInput.value.trim();
+      if (!topic) return void (resultContainer.innerHTML = '<p class="agent-empty">请先输入作文题目。</p>');
+      const draftState = await resolveDraftFromInputOrHandwriting(draftInput, examWordCount, resultContainer, '修改任务单');
+      const draft = draftState.draft.trim();
+      if (!draft) return void (resultContainer.innerHTML = `<p class="agent-empty">${draftState.fromOcr ? '手写图片已识别，但暂未成功提取出可用正文，请换一张更清晰的照片再试。' : '请先粘贴作文草稿。'}</p>`);
+      resultContainer.innerHTML = `<p class="agent-empty">${draftState.fromOcr ? '已自动回填手写正文，' : ''}正在整理修改任务单，请稍候...</p>`;
+      const teacherReport = await buildShanghaiTeacherReviewReport(topic, draft);
+      renderRevisionTaskList(teacherReport, resultContainer);
+    } catch (error) {
+      renderWorkbenchActionError(resultContainer, '修改任务单生成失败', error);
+    }
   });
 
   weeklyDashboardBtn?.addEventListener('click', () => {
@@ -1516,6 +1528,20 @@ window.quickGenerateEssay = () => {
     resultContainer.innerHTML = `<p class="agent-empty">范文生成失败：${escapeHtml(err?.message || '未知错误')}</p>`;
   }
 };
+
+function renderWorkbenchActionError(container, title, error) {
+  if (!container) return;
+  const message = error?.message || String(error || '未知错误');
+  console.error(title, error);
+  container.innerHTML = `
+    <div class="agent-result-block">
+      <h4>${escapeHtml(title)}</h4>
+      <p class="agent-para-issues high">系统没有完成本次报告，但不会再卡在加载状态。</p>
+      <p>错误信息：${escapeHtml(message)}</p>
+      <p>可以先点击“防跑题检查”，或刷新页面后再试一次。</p>
+    </div>
+  `;
+}
 
 function analyzeEssayTopic(topic) {
   const t = topic.toLowerCase();
@@ -4298,6 +4324,7 @@ function buildTeacherRevisionSuggestions(report) {
 }
 
 let OBSIDIAN_ENTRY_INDEX_CACHE = null;
+const OBSIDIAN_INDEX_FETCH_TIMEOUT_MS = 1200;
 
 async function loadObsidianEntryIndex() {
   if (Array.isArray(OBSIDIAN_ENTRY_INDEX_CACHE)) return OBSIDIAN_ENTRY_INDEX_CACHE;
@@ -4305,13 +4332,20 @@ async function loadObsidianEntryIndex() {
     OBSIDIAN_ENTRY_INDEX_CACHE = [];
     return OBSIDIAN_ENTRY_INDEX_CACHE;
   }
+  const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  const timer = controller ? setTimeout(() => controller.abort(), OBSIDIAN_INDEX_FETCH_TIMEOUT_MS) : null;
   try {
-    const response = await fetch('obsidian_vault/_meta/obsidian-entry-index.json', { cache: 'no-store' });
+    const response = await fetch('obsidian_vault/_meta/obsidian-entry-index.json', {
+      cache: 'no-store',
+      signal: controller?.signal
+    });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const data = await response.json();
     OBSIDIAN_ENTRY_INDEX_CACHE = Array.isArray(data) ? data : [];
   } catch (_) {
     OBSIDIAN_ENTRY_INDEX_CACHE = [];
+  } finally {
+    if (timer) clearTimeout(timer);
   }
   return OBSIDIAN_ENTRY_INDEX_CACHE;
 }
@@ -4467,7 +4501,11 @@ async function buildShanghaiTeacherReviewReport(topic, draft, options = {}) {
   };
   report.comment80 = buildTeacherShortComment(report);
   report.suggestions = buildTeacherRevisionSuggestions(report);
-  report.obsidianSuggestions = await buildVisibleObsidianSuggestions(topic, draft, analysis, report);
+  try {
+    report.obsidianSuggestions = await buildVisibleObsidianSuggestions(topic, draft, analysis, report);
+  } catch (_) {
+    report.obsidianSuggestions = buildFallbackVisibleExampleSuggestions(topic, analysis, report);
+  }
   return report;
 }
 
