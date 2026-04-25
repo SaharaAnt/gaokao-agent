@@ -2824,7 +2824,9 @@ function materialFromCard(card) {
 }
 
 function loadExampleTrainingLibrary() {
-  return Array.isArray(SHANGHAI_EXAMPLE_LIBRARY) ? SHANGHAI_EXAMPLE_LIBRARY : [];
+  return (typeof SHANGHAI_EXAMPLE_LIBRARY !== 'undefined' && Array.isArray(SHANGHAI_EXAMPLE_LIBRARY))
+    ? SHANGHAI_EXAMPLE_LIBRARY
+    : [];
 }
 
 function findExampleTrainingCardById(id) {
@@ -2920,7 +2922,9 @@ function buildExampleGuidedKit(topic, topicType, topicPhrases) {
 }
 
 function loadShanghaiMethodArchive() {
-  return Array.isArray(SHANGHAI_METHOD_ARCHIVE) ? SHANGHAI_METHOD_ARCHIVE : [];
+  return (typeof SHANGHAI_METHOD_ARCHIVE !== 'undefined' && Array.isArray(SHANGHAI_METHOD_ARCHIVE))
+    ? SHANGHAI_METHOD_ARCHIVE
+    : [];
 }
 
 function scoreMethodArchiveNote(note, topic, topicType) {
