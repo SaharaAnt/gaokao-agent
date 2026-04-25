@@ -75,20 +75,6 @@
         <div class="essay-library-list" id="essaySampleList"></div>
       </div>
 
-      <div class="material-card-lab" id="materialCardLab">
-        <div class="essay-library-title">公众号文章素材卡导入器</div>
-        <p class="material-card-tip">粘贴你有权学习使用的文章内容，系统只保存提炼后的素材卡，不公开保存全文。</p>
-        <label class="agent-label" for="materialTitleInput">文章标题</label>
-        <input id="materialTitleInput" class="material-input" placeholder="例如：【王老师教作文67】松江区高三二模佳作评析" />
-        <label class="agent-label" for="materialBodyInput">文章正文</label>
-        <textarea id="materialBodyInput" class="agent-textarea material-body" placeholder="粘贴文章正文，系统会提取题目、中心论点、结构、素材和金句。"></textarea>
-        <div class="agent-actions">
-          <button id="createMaterialCardBtn" class="agent-btn primary">生成素材卡</button>
-          <button id="clearMaterialInputBtn" class="agent-btn ghost">清空输入</button>
-        </div>
-        <div id="materialCardList" class="material-card-list"></div>
-      </div>
-
       <div class="material-card-lab example-card-lab" id="exampleTrainingLab">
         <div class="essay-library-title">上海范例训练库（内置）</div>
         <p class="material-card-tip">已把《作文范例 25-26》中的题目解析、佳作亮点和教师点评提炼成训练卡，可直接查看、练此题、收进素材卡并参与范文生成。</p>
@@ -114,22 +100,6 @@
         <p id="handwritingOcrStatus" class="handwriting-ocr-status">未上传手写图片时，书写项暂按中档估计；最多支持上传5张。</p>
         <div id="handwritingPreviewList" class="handwriting-preview-list">
           <div class="handwriting-empty">暂未上传图片</div>
-        </div>
-      </div>
-
-      <div class="exam-mode-panel" id="examModePanel">
-        <div class="exam-mode-header">
-          <h3>考场模式（25分钟 / 800字）</h3>
-          <span class="exam-mode-badge" id="examModeStatus">未开始</span>
-        </div>
-        <div class="exam-mode-controls">
-          <button id="startExamModeBtn" class="agent-btn primary">开始计时</button>
-          <button id="pauseExamModeBtn" class="agent-btn ghost">暂停</button>
-          <button id="resetExamModeBtn" class="agent-btn ghost">重置</button>
-        </div>
-        <div class="exam-mode-stats">
-          <div class="exam-stat"><span class="exam-stat-label">剩余时间</span><strong id="examCountdown">25:00</strong></div>
-          <div class="exam-stat"><span class="exam-stat-label">当前字数</span><strong id="examWordCount">0 / 800</strong></div>
         </div>
       </div>
 
@@ -171,6 +141,6 @@
   </section>
 
     <script src="data.js?v=54"></script>
-    <script src="app.js?v=57"></script>
+    <script src="app.js?v=58"></script>
 </body>
 </html>
