@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;900&family=ZCOOL+KuaiLe&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="styles.css?v=49" />
+    <link rel="stylesheet" href="styles.css?v=52" />
 </head>
 <body>
   <div class="bg-particles" id="particles"></div>
@@ -102,7 +102,7 @@
         <div class="handwriting-panel-head">
           <div>
             <div class="essay-library-title">手写作文图片（可选）</div>
-            <p class="material-card-tip">上传手写作文照片后，系统会用浏览器端 OCR 辅助判断字迹清晰度、疑似涂改、版面噪音，并把结果计入“书写规范”项。首次识别需要联网加载模型。</p>
+            <p class="material-card-tip">最多可上传5张手写作文照片。点击“草稿评分”或“习作精批”后，系统会自动进行浏览器端 OCR，辅助判断字迹清晰度、疑似涂改、版面噪音，并把结果计入“书写规范”项。首次识别需要联网加载模型。</p>
           </div>
           <span id="handwritingStatusBadge" class="handwriting-status-badge">未上传</span>
         </div>
@@ -110,7 +110,7 @@
           <input id="handwritingImageInput" class="material-input" type="file" accept="image/*" multiple />
           <button id="clearHandwritingImageBtn" class="agent-btn ghost" type="button">清空图片</button>
         </div>
-        <p id="handwritingOcrStatus" class="handwriting-ocr-status">未上传手写图片时，书写项暂按中档估计。</p>
+        <p id="handwritingOcrStatus" class="handwriting-ocr-status">未上传手写图片时，书写项暂按中档估计；最多支持上传5张。</p>
         <div id="handwritingPreviewList" class="handwriting-preview-list">
           <div class="handwriting-empty">暂未上传图片</div>
         </div>
@@ -169,7 +169,7 @@
     <div class="timeline" id="timelineContainer"></div>
   </section>
 
-    <script src="data.js?v=51"></script>
-    <script src="app.js?v=51"></script>
+    <script src="data.js?v=52"></script>
+    <script src="app.js?v=52"></script>
 </body>
 </html>

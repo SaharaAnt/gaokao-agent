@@ -7,6 +7,7 @@ const ERROR_BOOK_STORAGE_KEY = 'gaokao_error_book_v1';
 const MATERIAL_CARD_STORAGE_KEY = 'gaokao_material_cards_v1';
 const TRAINING_SESSION_LIMIT = 120;
 const HANDWRITING_OCR_CDN = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
+const HANDWRITING_MAX_FILES = 5;
 const HANDWRITING_ANALYSIS_MAX_WIDTH = 420;
 const HANDWRITING_OCR_MAX_WIDTH = 1600;
 const HANDWRITING_SCAN_STATE = {
@@ -211,7 +212,7 @@ function updateHandwritingUi(status, message) {
   }
   if (statusEl) {
     statusEl.className = `handwriting-ocr-status ${tone}`;
-    statusEl.textContent = message || (HANDWRITING_SCAN_STATE.pages.length ? '已上传手写图片，评分时会自动OCR识别。' : '未上传手写图片时，书写项暂按中档估计。');
+    statusEl.textContent = message || (HANDWRITING_SCAN_STATE.pages.length ? `已上传手写图片，点击“草稿评分”或“习作精批”时会自动OCR识别（最多${HANDWRITING_MAX_FILES}张）。` : `未上传手写图片时，书写项暂按中档估计；最多支持上传${HANDWRITING_MAX_FILES}张。`);
   }
 }
 
@@ -274,7 +275,9 @@ async function handleHandwritingFiles(fileList) {
   }
   updateHandwritingUi('loading', '正在读取手写图片...');
   const pages = [];
-  for (const file of files.slice(0, 4)) {
+  const limitedFiles = files.slice(0, HANDWRITING_MAX_FILES);
+  const ignoredCount = Math.max(0, files.length - limitedFiles.length);
+  for (const file of limitedFiles) {
     const dataUrl = await readFileAsDataUrl(file);
     pages.push({
       name: file.name,
@@ -289,7 +292,12 @@ async function handleHandwritingFiles(fileList) {
   HANDWRITING_SCAN_STATE.status = 'ready';
   resetHandwritingScanCache();
   renderHandwritingPreviewList();
-  updateHandwritingUi('ready', `已上传${pages.length}页手写图片，点击“草稿评分”或“习作精批”时会自动识别。`);
+  updateHandwritingUi(
+    'ready',
+    ignoredCount
+      ? `已上传${pages.length}页手写图片，系统只保留前${HANDWRITING_MAX_FILES}张；另外${ignoredCount}张未导入。点击“草稿评分”或“习作精批”时会自动识别。`
+      : `已上传${pages.length}页手写图片，点击“草稿评分”或“习作精批”时会自动识别。`
+  );
 }
 
 function normalizeForOcrCompare(text) {
@@ -701,7 +709,7 @@ function initAgentWorkbench() {
   renderMaterialCardList(materialCardList);
   renderExampleTrainingList(exampleTrainingList);
   renderHandwritingPreviewList();
-  updateHandwritingUi('ready', HANDWRITING_SCAN_STATE.pages.length ? '已上传手写图片，评分时会自动OCR识别。' : '未上传手写图片时，书写项暂按中档估计。');
+  updateHandwritingUi('ready', HANDWRITING_SCAN_STATE.pages.length ? `已上传手写图片，评分时会自动OCR识别（最多${HANDWRITING_MAX_FILES}张）。` : `未上传手写图片时，书写项暂按中档估计；最多支持上传${HANDWRITING_MAX_FILES}张。`);
   updateExamWordCountDisplay(draftInput, examWordCount);
   renderExamCountdown(examCountdown, examState.remaining);
 
@@ -761,9 +769,14 @@ function initAgentWorkbench() {
     const draft = draftInput.value.trim();
     if (!topic) return void (resultContainer.innerHTML = '<p class="agent-empty">请先输入作文题目。</p>');
     if (!draft) return void (resultContainer.innerHTML = '<p class="agent-empty">请先粘贴作文草稿。</p>');
-    resultContainer.innerHTML = '<p class="agent-empty">正在生成上海模考阅卷报告，请稍候...</p>';
+    const hasHandwriting = HANDWRITING_SCAN_STATE.pages.length > 0;
+    resultContainer.innerHTML = `<p class="agent-empty">${hasHandwriting ? `检测到${HANDWRITING_SCAN_STATE.pages.length}张手写图片，正在自动OCR识别并生成上海模考阅卷报告，请稍候...` : '正在生成上海模考阅卷报告，请稍候...'}</p>`;
     const legacyScore = scoreEssayDraft(topic, draft);
-    const report = await buildShanghaiTeacherReviewReport(topic, draft);
+    const precomputedHandwriting = hasHandwriting ? await assessHandwritingByOCR(draft) : null;
+    if (hasHandwriting) {
+      resultContainer.innerHTML = '<p class="agent-empty">手写图片识别已完成，正在整理上海模考阅卷报告...</p>';
+    }
+    const report = await buildShanghaiTeacherReviewReport(topic, draft, { precomputedHandwriting });
     updateTrainingStats(legacyScore.dimensions, {
       topic,
       total: legacyScore.total,
@@ -781,9 +794,14 @@ function initAgentWorkbench() {
     const draft = draftInput.value.trim();
     if (!topic) return void (resultContainer.innerHTML = '<p class="agent-empty">请先输入作文题目。</p>');
     if (!draft) return void (resultContainer.innerHTML = '<p class="agent-empty">请先粘贴作文草稿。</p>');
-    resultContainer.innerHTML = '<p class="agent-empty">正在生成老师式逐段精批，请稍候...</p>';
+    const hasHandwriting = HANDWRITING_SCAN_STATE.pages.length > 0;
+    resultContainer.innerHTML = `<p class="agent-empty">${hasHandwriting ? `检测到${HANDWRITING_SCAN_STATE.pages.length}张手写图片，正在自动OCR识别并生成老师式逐段精批，请稍候...` : '正在生成老师式逐段精批，请稍候...'}</p>`;
     const legacyReport = buildMasterCritiqueReport(topic, draft);
-    const teacherReport = await buildShanghaiTeacherReviewReport(topic, draft);
+    const precomputedHandwriting = hasHandwriting ? await assessHandwritingByOCR(draft) : null;
+    if (hasHandwriting) {
+      resultContainer.innerHTML = '<p class="agent-empty">手写图片识别已完成，正在整理老师式逐段精批...</p>';
+    }
+    const teacherReport = await buildShanghaiTeacherReviewReport(topic, draft, { precomputedHandwriting });
     updateTrainingStats(legacyReport.score.dimensions, {
       topic,
       total: legacyReport.score.total,
@@ -4045,7 +4063,7 @@ function buildTeacherRevisionSuggestions(report) {
   return suggestions.slice(0, 3);
 }
 
-async function buildShanghaiTeacherReviewReport(topic, draft) {
+async function buildShanghaiTeacherReviewReport(topic, draft, options = {}) {
   const analysis = analyzeEssayTopic(topic);
   const offTopic = runOffTopicCheck(topic, draft);
   const intent = getCoreIntentBand(offTopic);
@@ -4054,7 +4072,7 @@ async function buildShanghaiTeacherReviewReport(topic, draft) {
   const material = assessMaterialFreshness(draft);
   const language = assessLanguageExpression(topic, draft, analysis);
   const structure = assessStructureDraft(draft, analysis);
-  const handwriting = await assessHandwritingByOCR(draft);
+  const handwriting = options.precomputedHandwriting || await assessHandwritingByOCR(draft);
   const total = intent.score + thesis.score + argument.score + material.score + language.score + structure.score + handwriting.score;
   const paragraphRows = buildParagraphIssueRowsForTeacher(topic, draft, offTopic, thesis);
   const report = {
@@ -4120,6 +4138,10 @@ function renderTeacherScoreReport(report, container) {
       <div class="score-grid">${renderTeacherDimensionRows(report)}</div>
     </div>
     <div class="agent-result-block">
+      <h4>手写识别结果</h4>
+      <p>${escapeHtml(report.handwriting.detail)}</p>
+    </div>
+    <div class="agent-result-block">
       <h4>中心论点与论证方式检查</h4>
       <p>中心论点：${escapeHtml(report.thesis.thesisSentence ? `第${report.thesis.thesisParagraph + 1}段“${takeSentencePreview(report.thesis.thesisSentence, 24)}”` : '开头两段未稳定立论')}</p>
       <p>引证：${report.argument.quoteCount > 0 ? `有 ${report.argument.quoteCount} 处` : '未见明显引证'} ｜ 例证：${report.argument.exampleCount > 0 ? `有 ${report.argument.exampleCount} 处` : '未见明显例证'} ｜ 比喻论证：${report.argument.metaphorCount > 0 ? `有 ${report.argument.metaphorCount} 处` : '未见明显比喻论证'}</p>
@@ -4174,6 +4196,10 @@ function renderTeacherCritiqueReport(report, container) {
     <div class="agent-result-block">
       <h4>分项得分</h4>
       <div class="score-grid">${renderTeacherDimensionRows(report)}</div>
+    </div>
+    <div class="agent-result-block">
+      <h4>手写识别结果</h4>
+      <p>${escapeHtml(report.handwriting.detail)}</p>
     </div>
     <div class="agent-result-block">
       <h4>逐段指出问题</h4>
