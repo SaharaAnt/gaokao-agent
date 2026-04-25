@@ -1,5 +1,9 @@
 _tmp_docx_extract/
 _tmp_docx_examples/
+_tmp_obsidian_extract/
+_tmp_training_docs/
+.obsidian/
+*.base
 *.log
 Thumbs.db
 .DS_Store
