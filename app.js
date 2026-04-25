@@ -4297,6 +4297,147 @@ function buildTeacherRevisionSuggestions(report) {
   return suggestions.slice(0, 3);
 }
 
+let OBSIDIAN_ENTRY_INDEX_CACHE = null;
+
+async function loadObsidianEntryIndex() {
+  if (Array.isArray(OBSIDIAN_ENTRY_INDEX_CACHE)) return OBSIDIAN_ENTRY_INDEX_CACHE;
+  if (typeof fetch !== 'function') {
+    OBSIDIAN_ENTRY_INDEX_CACHE = [];
+    return OBSIDIAN_ENTRY_INDEX_CACHE;
+  }
+  try {
+    const response = await fetch('obsidian_vault/_meta/obsidian-entry-index.json', { cache: 'no-store' });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json();
+    OBSIDIAN_ENTRY_INDEX_CACHE = Array.isArray(data) ? data : [];
+  } catch (_) {
+    OBSIDIAN_ENTRY_INDEX_CACHE = [];
+  }
+  return OBSIDIAN_ENTRY_INDEX_CACHE;
+}
+
+function getTeacherReportWeakFocus(report) {
+  const dimensions = [
+    { key: '立意', score: report.intent?.score ?? 0, max: report.intent?.max ?? 12, action: '先对照范文开头，检查它怎样界定核心概念、怎样把题目问法转成中心判断。' },
+    { key: '中心论点', score: report.thesis?.score ?? 0, max: report.thesis?.max ?? 10, action: '重点看范文第1段末尾或第2段开头，学习“完整判断句”如何贯穿全文。' },
+    { key: '论证逻辑', score: report.argument?.score ?? 0, max: report.argument?.max ?? 12, action: '重点看范文中段，标出“观点-例证-机制解释-回扣题眼”的完整链条。' },
+    { key: '语言表达', score: report.language?.score ?? 0, max: report.language?.max ?? 10, action: '重点看范文如何用短判断句承接转折，不学辞藻，学句子推进。' },
+    { key: '结构章法', score: report.structure?.score ?? 0, max: report.structure?.max ?? 8, action: '重点看范文段落顺序，确认它是否按“界定-展开-边界-收束”推进。' }
+  ];
+  return dimensions
+    .map((item) => ({ ...item, ratio: item.max ? item.score / item.max : 0 }))
+    .sort((a, b) => a.ratio - b.ratio)[0] || dimensions[0];
+}
+
+function scoreObsidianEntryForEssay(entry, topic, draft, analysis) {
+  const topicText = String(topic || '');
+  const draftText = String(draft || '');
+  const haystack = `${entry.title || ''} ${entry.topicKey || ''} ${entry.topicType || ''} ${entry.themeTag || ''}`;
+  const topicTypeName = analysis?.topicType?.name || detectTopicType(topicText).name;
+  const phrases = dedupeArray([...(analysis?.topicPhrases || []), ...extractTopicPhrases(topicText)]).filter(Boolean);
+  let score = 0;
+  const reasons = [];
+
+  if (entry.topicType && topicTypeName && entry.topicType === topicTypeName) {
+    score += 28;
+    reasons.push(`同属“${entry.topicType}”`);
+  }
+  phrases.slice(0, 5).forEach((phrase) => {
+    if (phrase && haystack.includes(phrase)) {
+      score += 18;
+      reasons.push(`题眼同频：${phrase}`);
+    }
+  });
+  if (/(是否|吗|怎样|如何|为什么|何以|必定)/.test(topicText) && entry.topicType === '问题式命题') {
+    score += 10;
+    reasons.push('同为问题式设问');
+  }
+  if (/(价值|意义|认可|有用|无用|值得)/.test(topicText) && entry.topicType === '价值判断题') {
+    score += 8;
+    reasons.push('同为价值判断角度');
+  }
+  if (/(关系|既|又|与|和|之间|一方面|另一方面)/.test(topicText) && entry.topicType === '关系辩证题') {
+    score += 8;
+    reasons.push('同为关系辨析角度');
+  }
+  (['AI', '人工智能', '短视频', '社交媒体', '学习', '知识', '责任', '自由', '认可度', '断舍离', '创新', '好奇心']).forEach((kw) => {
+    if ((topicText.includes(kw) || draftText.includes(kw)) && haystack.includes(kw)) {
+      score += 6;
+      reasons.push(`现实关键词：${kw}`);
+    }
+  });
+
+  return { score, reasons: dedupeArray(reasons).slice(0, 3) };
+}
+
+function buildFallbackVisibleExampleSuggestions(topic, analysis, report) {
+  const weakFocus = getTeacherReportWeakFocus(report);
+  const cards = pickRelevantExampleCards(topic, analysis?.topicType, 3);
+  return cards.map((card, index) => ({
+    rank: index + 1,
+    title: card.title,
+    meta: `${card.source || '内置范例训练卡'}｜${(card.categories || []).join(' / ') || '上海作文范例'}`,
+    why: card.focus || card.intent || '与当前题目的题型或关键词相近，可用来做同类题对照。',
+    visibleAction: weakFocus.action,
+    selfCheck: card.risk ? `对照避坑：${card.risk}` : `对照后只做一件事：把自己文章中最弱的“${weakFocus.key}”补清楚。`,
+    location: `应用内置范例训练卡：${card.id}`,
+    matchScore: card.matchScore || 0
+  }));
+}
+
+async function buildVisibleObsidianSuggestions(topic, draft, analysis, report) {
+  const weakFocus = getTeacherReportWeakFocus(report);
+  const index = await loadObsidianEntryIndex();
+  const entries = index
+    .map((entry) => {
+      const matched = scoreObsidianEntryForEssay(entry, topic, draft, analysis);
+      return { ...entry, matchScore: matched.score, matchReasons: matched.reasons };
+    })
+    .filter((entry) => entry.matchScore > 0)
+    .sort((a, b) => b.matchScore - a.matchScore)
+    .slice(0, 3);
+
+  if (!entries.length) {
+    return buildFallbackVisibleExampleSuggestions(topic, analysis, report);
+  }
+
+  return entries.map((entry, index) => {
+    const reasons = entry.matchReasons?.length ? entry.matchReasons.join('；') : '题型或主题接近';
+    return {
+      rank: index + 1,
+      title: entry.title || entry.topicKey || '未命名范文档案',
+      meta: `${entry.sourceFile || 'Obsidian范文库'}｜${entry.yearLabel || '年份未标'}｜${entry.topicType || '题型未标'}｜${entry.themeTag || '母题未标'}`,
+      why: reasons,
+      visibleAction: weakFocus.action,
+      selfCheck: `看完后回到自己的第${report.paragraphRows?.[0]?.paragraph || 2}段，只检查“${weakFocus.key}”这一项，不要整篇重写。`,
+      location: entry.wikiPath ? `Obsidian 定位：[[${entry.wikiPath}]]` : `Obsidian 文件：${entry.notePath || '未记录路径'}`,
+      matchScore: entry.matchScore
+    };
+  });
+}
+
+function renderVisibleObsidianSuggestionBlock(items) {
+  const rows = (items || []).map((item) => `
+    <div class="flaw-row obsidian-visible-card">
+      <div class="flaw-row-top">
+        <span>对照建议 ${item.rank}｜${escapeHtml(item.title)}</span>
+        <strong>匹配度 ${Math.round(item.matchScore || 0)}</strong>
+      </div>
+      <p><strong>为什么看它</strong>：${escapeHtml(item.why || '与当前习作题型接近。')}</p>
+      <p><strong>看得见的动作</strong>：${escapeHtml(item.visibleAction || '只学它的结构，不照搬表达。')}</p>
+      <p><strong>自改检查</strong>：${escapeHtml(item.selfCheck || '看完后只改自己文章中最弱的一项。')}</p>
+      <p><strong>位置</strong>：${escapeHtml(item.meta || '')}；${escapeHtml(item.location || '')}</p>
+    </div>
+  `).join('');
+  return `
+    <div class="agent-result-block">
+      <h4>Obsidian 范文库可见建议</h4>
+      <p>不是让孩子照抄范文，而是给他一个“看得见的对照物”：看哪篇、看什么、回到自己文章改哪一项。</p>
+      ${rows || '<p>暂未匹配到 Obsidian 范文；可先补全题目，或在范文库中增加同题档案。</p>'}
+    </div>
+  `;
+}
+
 async function buildShanghaiTeacherReviewReport(topic, draft, options = {}) {
   const analysis = analyzeEssayTopic(topic);
   const offTopic = runOffTopicCheck(topic, draft);
@@ -4326,6 +4467,7 @@ async function buildShanghaiTeacherReviewReport(topic, draft, options = {}) {
   };
   report.comment80 = buildTeacherShortComment(report);
   report.suggestions = buildTeacherRevisionSuggestions(report);
+  report.obsidianSuggestions = await buildVisibleObsidianSuggestions(topic, draft, analysis, report);
   return report;
 }
 
@@ -4396,6 +4538,7 @@ function renderTeacherScoreReport(report, container) {
       <ul>${suggestionRows}</ul>
       <p class="agent-para-issues">这里只指出问题和修改任务，不替孩子改写正文。</p>
     </div>
+    ${renderVisibleObsidianSuggestionBlock(report.obsidianSuggestions || [])}
   `;
 }
 
@@ -4444,6 +4587,7 @@ function renderTeacherCritiqueReport(report, container) {
       <ul>${suggestionRows}</ul>
       <p class="agent-para-issues">AI只指出问题，正文请学生自己改。</p>
     </div>
+    ${renderVisibleObsidianSuggestionBlock(report.obsidianSuggestions || [])}
   `;
 }
 
@@ -4477,6 +4621,7 @@ function renderRevisionTaskList(report, container) {
       ${paragraphRows || '<p>当前未识别出逐段任务。</p>'}
       <p class="agent-para-issues">这里只列任务，不替孩子改正文。改，由学生自己完成。</p>
     </div>
+    ${renderVisibleObsidianSuggestionBlock(report.obsidianSuggestions || [])}
   `;
 }
 
