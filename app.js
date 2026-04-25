@@ -212,7 +212,7 @@ function updateHandwritingUi(status, message) {
   }
   if (statusEl) {
     statusEl.className = `handwriting-ocr-status ${tone}`;
-    statusEl.textContent = message || (HANDWRITING_SCAN_STATE.pages.length ? `已上传手写图片，点击“草稿评分”或“习作精批”时会自动OCR识别（最多${HANDWRITING_MAX_FILES}张）。` : `未上传手写图片时，书写项暂按中档估计；最多支持上传${HANDWRITING_MAX_FILES}张。`);
+    statusEl.textContent = message || (HANDWRITING_SCAN_STATE.pages.length ? `已上传手写图片，点击“草稿评分”或“习作精批”时会自动OCR识别；若草稿框为空，会先自动回填正文（最多${HANDWRITING_MAX_FILES}张）。` : `未上传手写图片时，书写项暂按中档估计；最多支持上传${HANDWRITING_MAX_FILES}张。`);
   }
 }
 
@@ -564,6 +564,80 @@ async function runHandwritingOcrAnalysis(draft) {
   };
 }
 
+function normalizeRecognizedHandwritingDraft(text) {
+  const raw = String(text || '').replace(/\r/g, '\n');
+  const cleanLines = raw
+    .split('\n')
+    .map((line) => line.replace(/\s+/g, '').trim())
+    .filter(Boolean);
+  if (!cleanLines.length) return '';
+
+  const paragraphs = [];
+  let current = '';
+  cleanLines.forEach((line) => {
+    current += line;
+    const shouldBreak = /[。！？；!?]$/.test(line) || current.length >= 130;
+    if (shouldBreak) {
+      paragraphs.push(current);
+      current = '';
+    }
+  });
+  if (current) paragraphs.push(current);
+  return paragraphs.join('\n\n');
+}
+
+async function resolveDraftFromInputOrHandwriting(draftInput, wordCountEl, resultContainer, actionLabel) {
+  const existingDraft = String(draftInput?.value || '').trim();
+  if (existingDraft) {
+    return {
+      draft: existingDraft,
+      fromOcr: false,
+      ocrText: ''
+    };
+  }
+
+  if (!HANDWRITING_SCAN_STATE.pages.length) {
+    return {
+      draft: '',
+      fromOcr: false,
+      ocrText: ''
+    };
+  }
+
+  if (resultContainer) {
+    resultContainer.innerHTML = `<p class="agent-empty">未检测到草稿正文，正在从${HANDWRITING_SCAN_STATE.pages.length}张手写图片自动识别正文并继续${escapeHtml(actionLabel || '处理')}，请稍候...</p>`;
+  }
+
+  try {
+    const ocr = await runHandwritingOcrAnalysis('');
+    const normalizedDraft = normalizeRecognizedHandwritingDraft(ocr.text);
+    if (!normalizedDraft) {
+      return {
+        draft: '',
+        fromOcr: true,
+        ocrText: ''
+      };
+    }
+
+    if (draftInput) draftInput.value = normalizedDraft;
+    updateExamWordCountDisplay(draftInput, wordCountEl);
+    return {
+      draft: normalizedDraft,
+      fromOcr: true,
+      ocrText: normalizedDraft
+    };
+  } catch (error) {
+    HANDWRITING_SCAN_STATE.status = 'error';
+    HANDWRITING_SCAN_STATE.error = error?.message || 'OCR识别失败';
+    updateHandwritingUi('error', `OCR识别失败：${HANDWRITING_SCAN_STATE.error}`);
+    return {
+      draft: '',
+      fromOcr: true,
+      ocrText: ''
+    };
+  }
+}
+
 function initParticles() {
   const container = document.getElementById('particles');
   if (!container) return;
@@ -709,7 +783,7 @@ function initAgentWorkbench() {
   renderMaterialCardList(materialCardList);
   renderExampleTrainingList(exampleTrainingList);
   renderHandwritingPreviewList();
-  updateHandwritingUi('ready', HANDWRITING_SCAN_STATE.pages.length ? `已上传手写图片，评分时会自动OCR识别（最多${HANDWRITING_MAX_FILES}张）。` : `未上传手写图片时，书写项暂按中档估计；最多支持上传${HANDWRITING_MAX_FILES}张。`);
+  updateHandwritingUi('ready', HANDWRITING_SCAN_STATE.pages.length ? `已上传手写图片，评分时会自动OCR识别；若草稿框为空，会先自动回填正文（最多${HANDWRITING_MAX_FILES}张）。` : `未上传手写图片时，书写项暂按中档估计；最多支持上传${HANDWRITING_MAX_FILES}张。`);
   updateExamWordCountDisplay(draftInput, examWordCount);
   renderExamCountdown(examCountdown, examState.remaining);
 
@@ -766,15 +840,16 @@ function initAgentWorkbench() {
 
   scoreDraftBtn?.addEventListener('click', async () => {
     const topic = topicInput.value.trim();
-    const draft = draftInput.value.trim();
     if (!topic) return void (resultContainer.innerHTML = '<p class="agent-empty">请先输入作文题目。</p>');
-    if (!draft) return void (resultContainer.innerHTML = '<p class="agent-empty">请先粘贴作文草稿。</p>');
+    const draftState = await resolveDraftFromInputOrHandwriting(draftInput, examWordCount, resultContainer, '草稿评分');
+    const draft = draftState.draft.trim();
+    if (!draft) return void (resultContainer.innerHTML = `<p class="agent-empty">${draftState.fromOcr ? '手写图片已识别，但暂未成功提取出可用正文，请换一张更清晰、更平整的照片再试。' : '请先粘贴作文草稿。'}</p>`);
     const hasHandwriting = HANDWRITING_SCAN_STATE.pages.length > 0;
-    resultContainer.innerHTML = `<p class="agent-empty">${hasHandwriting ? `检测到${HANDWRITING_SCAN_STATE.pages.length}张手写图片，正在自动OCR识别并生成上海模考阅卷报告，请稍候...` : '正在生成上海模考阅卷报告，请稍候...'}</p>`;
+    resultContainer.innerHTML = `<p class="agent-empty">${hasHandwriting ? `${draftState.fromOcr ? '已自动回填手写正文，' : ''}检测到${HANDWRITING_SCAN_STATE.pages.length}张手写图片，正在自动OCR识别并生成上海模考阅卷报告，请稍候...` : '正在生成上海模考阅卷报告，请稍候...'}</p>`;
     const legacyScore = scoreEssayDraft(topic, draft);
     const precomputedHandwriting = hasHandwriting ? await assessHandwritingByOCR(draft) : null;
     if (hasHandwriting) {
-      resultContainer.innerHTML = '<p class="agent-empty">手写图片识别已完成，正在整理上海模考阅卷报告...</p>';
+      resultContainer.innerHTML = `<p class="agent-empty">${draftState.fromOcr ? '手写正文已自动写入草稿框，' : ''}手写图片识别已完成，正在整理上海模考阅卷报告...</p>`;
     }
     const report = await buildShanghaiTeacherReviewReport(topic, draft, { precomputedHandwriting });
     updateTrainingStats(legacyScore.dimensions, {
@@ -791,15 +866,16 @@ function initAgentWorkbench() {
 
   masterCritiqueBtn?.addEventListener('click', async () => {
     const topic = topicInput.value.trim();
-    const draft = draftInput.value.trim();
     if (!topic) return void (resultContainer.innerHTML = '<p class="agent-empty">请先输入作文题目。</p>');
-    if (!draft) return void (resultContainer.innerHTML = '<p class="agent-empty">请先粘贴作文草稿。</p>');
+    const draftState = await resolveDraftFromInputOrHandwriting(draftInput, examWordCount, resultContainer, '习作精批');
+    const draft = draftState.draft.trim();
+    if (!draft) return void (resultContainer.innerHTML = `<p class="agent-empty">${draftState.fromOcr ? '手写图片已识别，但暂未成功提取出可用正文，请换一张更清晰、正向拍摄的照片再试。' : '请先粘贴作文草稿。'}</p>`);
     const hasHandwriting = HANDWRITING_SCAN_STATE.pages.length > 0;
-    resultContainer.innerHTML = `<p class="agent-empty">${hasHandwriting ? `检测到${HANDWRITING_SCAN_STATE.pages.length}张手写图片，正在自动OCR识别并生成老师式逐段精批，请稍候...` : '正在生成老师式逐段精批，请稍候...'}</p>`;
+    resultContainer.innerHTML = `<p class="agent-empty">${hasHandwriting ? `${draftState.fromOcr ? '已自动回填手写正文，' : ''}检测到${HANDWRITING_SCAN_STATE.pages.length}张手写图片，正在自动OCR识别并生成老师式逐段精批，请稍候...` : '正在生成老师式逐段精批，请稍候...'}</p>`;
     const legacyReport = buildMasterCritiqueReport(topic, draft);
     const precomputedHandwriting = hasHandwriting ? await assessHandwritingByOCR(draft) : null;
     if (hasHandwriting) {
-      resultContainer.innerHTML = '<p class="agent-empty">手写图片识别已完成，正在整理老师式逐段精批...</p>';
+      resultContainer.innerHTML = `<p class="agent-empty">${draftState.fromOcr ? '手写正文已自动写入草稿框，' : ''}手写图片识别已完成，正在整理老师式逐段精批...</p>`;
     }
     const teacherReport = await buildShanghaiTeacherReviewReport(topic, draft, { precomputedHandwriting });
     updateTrainingStats(legacyReport.score.dimensions, {
@@ -816,10 +892,11 @@ function initAgentWorkbench() {
 
   improveDraftBtn?.addEventListener('click', async () => {
     const topic = topicInput.value.trim();
-    const draft = draftInput.value.trim();
     if (!topic) return void (resultContainer.innerHTML = '<p class="agent-empty">请先输入作文题目。</p>');
-    if (!draft) return void (resultContainer.innerHTML = '<p class="agent-empty">请先粘贴作文草稿。</p>');
-    resultContainer.innerHTML = '<p class="agent-empty">正在整理修改任务单，请稍候...</p>';
+    const draftState = await resolveDraftFromInputOrHandwriting(draftInput, examWordCount, resultContainer, '修改任务单');
+    const draft = draftState.draft.trim();
+    if (!draft) return void (resultContainer.innerHTML = `<p class="agent-empty">${draftState.fromOcr ? '手写图片已识别，但暂未成功提取出可用正文，请换一张更清晰的照片再试。' : '请先粘贴作文草稿。'}</p>`);
+    resultContainer.innerHTML = `<p class="agent-empty">${draftState.fromOcr ? '已自动回填手写正文，' : ''}正在整理修改任务单，请稍候...</p>`;
     const teacherReport = await buildShanghaiTeacherReviewReport(topic, draft);
     renderRevisionTaskList(teacherReport, resultContainer);
   });
