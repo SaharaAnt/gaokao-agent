@@ -6,7 +6,10 @@ const PATH_TRAINING_STORAGE_KEY = 'gaokao_path_training_v1';
 const ERROR_BOOK_STORAGE_KEY = 'gaokao_error_book_v1';
 const MATERIAL_CARD_STORAGE_KEY = 'gaokao_material_cards_v1';
 const TRAINING_SESSION_LIMIT = 120;
-const HANDWRITING_OCR_CDN = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
+const HANDWRITING_OCR_CDN = 'https://cdn.jsdelivr.net/npm/tesseract.js@v5.0.0/dist/tesseract.min.js';
+const HANDWRITING_OCR_WORKER = 'https://cdn.jsdelivr.net/npm/tesseract.js@v5.0.0/dist/worker.min.js';
+const HANDWRITING_OCR_CORE = 'https://cdn.jsdelivr.net/npm/tesseract.js-core@v5.0.0';
+const HANDWRITING_OCR_LANG = 'https://tessdata.projectnaptha.com/4.0.0/';
 const HANDWRITING_MAX_FILES = 5;
 const HANDWRITING_ANALYSIS_MAX_WIDTH = 420;
 const HANDWRITING_OCR_MAX_WIDTH = 1600;
@@ -382,7 +385,7 @@ async function loadImageElement(source) {
   });
 }
 
-async function createProcessedCanvas(source, maxWidth, threshold = 182) {
+async function createProcessedCanvas(source, maxWidth, threshold = 182, mode = 'binary') {
   const img = await loadImageElement(source);
   const ratio = img.width > maxWidth ? maxWidth / img.width : 1;
   const width = Math.max(1, Math.round(img.width * ratio));
@@ -398,14 +401,32 @@ async function createProcessedCanvas(source, maxWidth, threshold = 182) {
   const data = imageData.data;
   for (let i = 0; i < data.length; i += 4) {
     const gray = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
-    const boosted = gray < threshold ? 0 : 255;
-    data[i] = boosted;
-    data[i + 1] = boosted;
-    data[i + 2] = boosted;
+    if (mode === 'gray') {
+      const boosted = gray < threshold
+        ? Math.max(0, gray * 0.55)
+        : Math.min(255, 235 + ((gray - threshold) * 0.25));
+      data[i] = boosted;
+      data[i + 1] = boosted;
+      data[i + 2] = boosted;
+    } else {
+      const boosted = gray < threshold ? 0 : 255;
+      data[i] = boosted;
+      data[i + 1] = boosted;
+      data[i + 2] = boosted;
+    }
     data[i + 3] = 255;
   }
   ctx.putImageData(imageData, 0, 0);
   return canvas;
+}
+
+function pickBetterOcrResult(primary, fallback) {
+  const primaryText = String(primary?.data?.text || '');
+  const fallbackText = String(fallback?.data?.text || '');
+  const primaryUseful = primaryText.replace(/\s+/g, '').length;
+  const fallbackUseful = fallbackText.replace(/\s+/g, '').length;
+  if (fallbackUseful > primaryUseful * 1.25) return fallback;
+  return primaryUseful >= fallbackUseful ? primary : fallback;
 }
 
 function analyzeBinaryCanvasMetrics(canvas) {
@@ -514,19 +535,28 @@ async function runHandwritingOcrAnalysis(draft) {
     const page = HANDWRITING_SCAN_STATE.pages[index];
     updateHandwritingUi('loading', `正在识别第${index + 1}/${HANDWRITING_SCAN_STATE.pages.length}页手写图片...`);
     const ocrCanvas = await createProcessedCanvas(page.dataUrl, HANDWRITING_OCR_MAX_WIDTH, 176);
+    const grayOcrCanvas = await createProcessedCanvas(page.dataUrl, HANDWRITING_OCR_MAX_WIDTH, 168, 'gray');
     const analysisCanvas = await createProcessedCanvas(page.dataUrl, HANDWRITING_ANALYSIS_MAX_WIDTH, 180);
     metricList.push(analyzeBinaryCanvasMetrics(analysisCanvas));
-    const result = await TesseractLib.recognize(ocrCanvas, 'chi_sim+eng', {
+    const ocrOptions = {
+      workerPath: HANDWRITING_OCR_WORKER,
+      corePath: HANDWRITING_OCR_CORE,
+      langPath: HANDWRITING_OCR_LANG,
       logger: (msg) => {
         if (msg?.status === 'recognizing text' && typeof msg.progress === 'number') {
           const percent = Math.round(msg.progress * 100);
           updateHandwritingUi('loading', `正在识别第${index + 1}/${HANDWRITING_SCAN_STATE.pages.length}页：${percent}%`);
         }
       }
-    });
+    };
+    const result = await TesseractLib.recognize(ocrCanvas, 'chi_sim+eng', ocrOptions);
+    const usefulLength = String(result?.data?.text || '').replace(/\s+/g, '').length;
+    const finalResult = usefulLength >= 12
+      ? result
+      : pickBetterOcrResult(result, await TesseractLib.recognize(grayOcrCanvas, 'chi_sim+eng', ocrOptions));
     ocrPages.push({
-      text: String(result?.data?.text || ''),
-      confidence: Number(result?.data?.confidence || 0)
+      text: String(finalResult?.data?.text || ''),
+      confidence: Number(finalResult?.data?.confidence || 0)
     });
   }
 
@@ -635,6 +665,43 @@ async function resolveDraftFromInputOrHandwriting(draftInput, wordCountEl, resul
       fromOcr: true,
       ocrText: ''
     };
+  }
+}
+
+async function fillDraftFromHandwritingImages(draftInput, wordCountEl, resultContainer) {
+  if (!HANDWRITING_SCAN_STATE.pages.length) {
+    if (resultContainer) resultContainer.innerHTML = '<p class="agent-empty">请先上传手写作文图片。</p>';
+    return '';
+  }
+  if (resultContainer) {
+    resultContainer.innerHTML = `<p class="agent-empty">正在从${HANDWRITING_SCAN_STATE.pages.length}张手写图片识别正文，请稍候...</p>`;
+  }
+  try {
+    const ocr = await runHandwritingOcrAnalysis('');
+    const normalizedDraft = normalizeRecognizedHandwritingDraft(ocr.text);
+    if (!normalizedDraft) {
+      if (resultContainer) {
+        resultContainer.innerHTML = '<p class="agent-empty">OCR已完成，但没有提取到可用正文。请尽量正向拍摄、减少阴影，并让作文纸占满画面后重试。</p>';
+      }
+      return '';
+    }
+    if (draftInput) {
+      draftInput.value = normalizedDraft;
+      draftInput.focus();
+    }
+    updateExamWordCountDisplay(draftInput, wordCountEl);
+    if (resultContainer) {
+      resultContainer.innerHTML = `<p class="agent-empty">已从手写图片识别并回填正文，当前约${countWords(normalizedDraft)}字。请先快速核对 OCR 文字，再点击“习作精批”或“草稿评分”。</p>`;
+    }
+    return normalizedDraft;
+  } catch (error) {
+    HANDWRITING_SCAN_STATE.status = 'error';
+    HANDWRITING_SCAN_STATE.error = error?.message || 'OCR识别失败';
+    updateHandwritingUi('error', `OCR识别失败：${HANDWRITING_SCAN_STATE.error}`);
+    if (resultContainer) {
+      resultContainer.innerHTML = `<p class="agent-empty">OCR识别失败：${escapeHtml(HANDWRITING_SCAN_STATE.error)}。请检查网络，或换一张更清晰的照片再试。</p>`;
+    }
+    return '';
   }
 }
 
@@ -765,6 +832,7 @@ function initAgentWorkbench() {
   const materialCardList = document.getElementById('materialCardList');
   const exampleTrainingList = document.getElementById('exampleTrainingList');
   const handwritingImageInput = document.getElementById('handwritingImageInput');
+  const handwritingOcrFillBtn = document.getElementById('handwritingOcrFillBtn');
   const clearHandwritingImageBtn = document.getElementById('clearHandwritingImageBtn');
   const examCountdown = document.getElementById('examCountdown');
   const examWordCount = document.getElementById('examWordCount');
@@ -795,6 +863,9 @@ function initAgentWorkbench() {
       HANDWRITING_SCAN_STATE.error = error?.message || '图片读取失败';
       updateHandwritingUi('error', `手写图片读取失败：${HANDWRITING_SCAN_STATE.error}`);
     }
+  });
+  handwritingOcrFillBtn?.addEventListener('click', async () => {
+    await fillDraftFromHandwritingImages(draftInput, examWordCount, resultContainer);
   });
   clearHandwritingImageBtn?.addEventListener('click', () => clearHandwritingUpload(handwritingImageInput));
 
@@ -4663,6 +4734,7 @@ async function runBaselineHealthCheck() {
     'essayTopicInput',
     'essayDraftInput',
     'handwritingImageInput',
+    'handwritingOcrFillBtn',
     'clearHandwritingImageBtn',
     'handwritingPreviewList',
     'analyzeTopicBtn',
@@ -4883,13 +4955,14 @@ function runFeatureFlowChecks() {
 
   try {
     const input = document.getElementById('handwritingImageInput');
+    const fillBtn = document.getElementById('handwritingOcrFillBtn');
     const preview = document.getElementById('handwritingPreviewList');
     const status = document.getElementById('handwritingOcrStatus');
-    const ok = !!input && !!preview && !!status;
+    const ok = !!input && !!fillBtn && !!preview && !!status;
     checks.push({
       name: '手写OCR上传区',
       ok,
-      detail: ok ? '图片上传、状态提示与预览区已接入' : '手写OCR上传区元素不完整'
+      detail: ok ? '图片上传、正文识别、状态提示与预览区已接入' : '手写OCR上传区元素不完整'
     });
   } catch (err) {
     checks.push({ name: '手写OCR上传区', ok: false, detail: `异常：${err?.message || '未知错误'}` });
