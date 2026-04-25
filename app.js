@@ -4438,8 +4438,27 @@ function buildTeacherRevisionSuggestions(report) {
 let OBSIDIAN_ENTRY_INDEX_CACHE = null;
 const OBSIDIAN_INDEX_FETCH_TIMEOUT_MS = 1200;
 
+function getEmbeddedObsidianEntryIndex() {
+  try {
+    if (typeof window !== 'undefined' && Array.isArray(window.OBSIDIAN_ENTRY_INDEX)) {
+      return window.OBSIDIAN_ENTRY_INDEX;
+    }
+    if (typeof OBSIDIAN_ENTRY_INDEX !== 'undefined' && Array.isArray(OBSIDIAN_ENTRY_INDEX)) {
+      return OBSIDIAN_ENTRY_INDEX;
+    }
+  } catch (_) {
+    return [];
+  }
+  return [];
+}
+
 async function loadObsidianEntryIndex() {
   if (Array.isArray(OBSIDIAN_ENTRY_INDEX_CACHE)) return OBSIDIAN_ENTRY_INDEX_CACHE;
+  const embedded = getEmbeddedObsidianEntryIndex();
+  if (embedded.length) {
+    OBSIDIAN_ENTRY_INDEX_CACHE = embedded;
+    return OBSIDIAN_ENTRY_INDEX_CACHE;
+  }
   if (typeof fetch !== 'function') {
     OBSIDIAN_ENTRY_INDEX_CACHE = [];
     return OBSIDIAN_ENTRY_INDEX_CACHE;
@@ -4462,6 +4481,55 @@ async function loadObsidianEntryIndex() {
   return OBSIDIAN_ENTRY_INDEX_CACHE;
 }
 
+function normalizeObsidianTopicTypeName(name) {
+  const text = String(name || '');
+  if (/问题|设问/.test(text)) return '问题式命题';
+  if (/关系|辩证|二元|对立/.test(text)) return '关系辩证题';
+  if (/价值|判断|认可|意义/.test(text)) return '价值判断题';
+  if (/话题/.test(text)) return '话题作文';
+  if (/材料|主题|路径|方法/.test(text)) return '材料作文';
+  if (/现象|思辨/.test(text)) return '';
+  return text || '未分类';
+}
+
+function normalizeObsidianMatchText(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[“”"‘’'《》〈〉（）()【】\[\]，。！？、：；\s\-—·.,!?;:]/g, '');
+}
+
+function inferObsidianThemeTag(topic, draft = '') {
+  const text = `${topic || ''} ${draft || ''}`;
+  const rules = [
+    { tag: '技术与传播', regex: /(专.*转.*传|专业文章|通俗文章|传世|传播|转发|媒介|短视频|互联网|AI|人工智能|知识生产|公共传播)/ },
+    { tag: '价值与意义', regex: /(认可度|价值|意义|有用|无用|值得|高下|传世|沉淀|认可|重要)/ },
+    { tag: '自我与成长', regex: /(自我|成长|内心|真实所求|断舍离|被需要|坚硬|柔软|选择|主体)/ },
+    { tag: '认知与判断', regex: /(判断|发问|结论|好奇心|陌生世界|预测|知识|综合|创新|中国味|标准)/ },
+    { tag: '关系与责任', regex: /(关系|责任|规则|自由|不自由|共识|对话|我们|他们|帮助)/ },
+    { tag: '生活现象与思辨', regex: /(生活|社会|现实|时代|评价|忙|流行|公共|群体|个人)/ }
+  ];
+  return rules.find((rule) => rule.regex.test(text))?.tag || '';
+}
+
+function extractObsidianMatchTerms(topic, draft, analysis) {
+  const topicText = String(topic || '');
+  const draftText = String(draft || '');
+  const quoted = [...topicText.matchAll(/[“"']([^”"']{1,16})[”"']/g)].map((m) => m[1]);
+  const fixed = ['认可度', '断舍离', '真实所求', '专', '转', '传', '好奇心', '陌生世界', '时间', '价值', '发问', '结论', '创新', '综合', '自由', '不自由', '被需要', '中国味'];
+  const chunks = (topicText.match(/[\u4e00-\u9fa5A-Za-z0-9]{2,10}/g) || [])
+    .map((x) => x.replace(/生活中|人们|请写|文章|谈谈|认识|思考|对此|要求|自拟|不少于/g, ''))
+    .filter((x) => x.length >= 2);
+  const draftSignals = fixed.filter((kw) => draftText.includes(kw));
+  return normalizeTopicPhrases(dedupeArray([
+    ...fixed.filter((kw) => topicText.includes(kw)),
+    ...quoted,
+    ...(analysis?.topicPhrases || []),
+    ...extractTopicPhrases(topicText),
+    ...chunks,
+    ...draftSignals
+  ])).filter((x) => normalizeObsidianMatchText(x).length >= 2);
+}
+
 function getTeacherReportWeakFocus(report) {
   const dimensions = [
     { key: '立意', score: report.intent?.score ?? 0, max: report.intent?.max ?? 12, action: '先对照范文开头，检查它怎样界定核心概念、怎样把题目问法转成中心判断。' },
@@ -4478,42 +4546,116 @@ function getTeacherReportWeakFocus(report) {
 function scoreObsidianEntryForEssay(entry, topic, draft, analysis) {
   const topicText = String(topic || '');
   const draftText = String(draft || '');
-  const haystack = `${entry.title || ''} ${entry.topicKey || ''} ${entry.topicType || ''} ${entry.themeTag || ''}`;
-  const topicTypeName = analysis?.topicType?.name || detectTopicType(topicText).name;
-  const phrases = dedupeArray([...(analysis?.topicPhrases || []), ...extractTopicPhrases(topicText)]).filter(Boolean);
+  const haystackRaw = [
+    entry.title,
+    entry.topicKey,
+    entry.topicType,
+    entry.themeTag,
+    entry.packTitle,
+    entry.sourceFile,
+    entry.typeNoteName,
+    entry.themeNoteName,
+    entry.clusterNoteName
+  ].filter(Boolean).join(' ');
+  const haystack = normalizeObsidianMatchText(haystackRaw);
+  const topicNorm = normalizeObsidianMatchText(topicText);
+  const entryTopicNorm = normalizeObsidianMatchText(`${entry.title || ''}${entry.topicKey || ''}`);
+  const topicTypeName = normalizeObsidianTopicTypeName(analysis?.topicType?.name || detectTopicType(topicText).name);
+  const entryTypeName = normalizeObsidianTopicTypeName(entry.topicType);
+  const inferredTheme = inferObsidianThemeTag(topicText, draftText);
+  const phrases = extractObsidianMatchTerms(topicText, draftText, analysis);
   let score = 0;
   const reasons = [];
 
-  if (entry.topicType && topicTypeName && entry.topicType === topicTypeName) {
-    score += 28;
-    reasons.push(`同属“${entry.topicType}”`);
+  const shortTopicNeedle = topicNorm.slice(0, 24);
+  if (shortTopicNeedle.length >= 8 && entryTopicNorm.includes(shortTopicNeedle)) {
+    score += 48;
+    reasons.push('同题档案');
   }
-  phrases.slice(0, 5).forEach((phrase) => {
-    if (phrase && haystack.includes(phrase)) {
-      score += 18;
+
+  if (entryTypeName && topicTypeName && entryTypeName === topicTypeName) {
+    score += 26;
+    reasons.push(`同属“${entryTypeName}”`);
+  }
+
+  if (inferredTheme && entry.themeTag === inferredTheme) {
+    score += 16;
+    reasons.push(`同母题：${inferredTheme}`);
+  }
+
+  phrases.slice(0, 10).forEach((phrase) => {
+    const needle = normalizeObsidianMatchText(phrase);
+    if (needle && haystack.includes(needle)) {
+      score += needle.length >= 4 ? 18 : 12;
       reasons.push(`题眼同频：${phrase}`);
     }
   });
-  if (/(是否|吗|怎样|如何|为什么|何以|必定)/.test(topicText) && entry.topicType === '问题式命题') {
+
+  if (/(是否|吗|怎样|如何|为什么|何以|必定|仅仅)/.test(topicText) && entryTypeName === '问题式命题') {
     score += 10;
     reasons.push('同为问题式设问');
   }
-  if (/(价值|意义|认可|有用|无用|值得)/.test(topicText) && entry.topicType === '价值判断题') {
+  if (/(价值|意义|认可|有用|无用|值得|高下)/.test(topicText) && entryTypeName === '价值判断题') {
     score += 8;
     reasons.push('同为价值判断角度');
   }
-  if (/(关系|既|又|与|和|之间|一方面|另一方面)/.test(topicText) && entry.topicType === '关系辩证题') {
+  const relationCoreText = topicText
+    .replace(/认识和思考|认识与思考|谈谈你对|谈谈你的|请写一篇文章/g, '')
+    .replace(/认识|思考/g, '');
+  if (/(关系|既.*又|之间|一方面|另一方面|对立|统一|自由.*不自由|坚硬.*柔软)/.test(relationCoreText) && entryTypeName === '关系辩证题') {
     score += 8;
     reasons.push('同为关系辨析角度');
   }
-  (['AI', '人工智能', '短视频', '社交媒体', '学习', '知识', '责任', '自由', '认可度', '断舍离', '创新', '好奇心']).forEach((kw) => {
-    if ((topicText.includes(kw) || draftText.includes(kw)) && haystack.includes(kw)) {
+
+  (['AI', '人工智能', '短视频', '社交媒体', '学习', '知识', '责任', '自由', '认可度', '断舍离', '创新', '好奇心', '真实所求', '传播']).forEach((kw) => {
+    if ((topicText.includes(kw) || draftText.includes(kw)) && haystack.includes(normalizeObsidianMatchText(kw))) {
       score += 6;
       reasons.push(`现实关键词：${kw}`);
     }
   });
 
   return { score, reasons: dedupeArray(reasons).slice(0, 3) };
+}
+
+function buildObsidianVisibleItem(entry, index, weakFocus, report, matched, mode = 'Obsidian范文库') {
+  const reasons = matched?.reasons?.length ? matched.reasons.join('；') : '题型或母题接近';
+  const weakParagraph = report.paragraphRows?.[0]?.paragraph || 2;
+  return {
+    rank: index + 1,
+    title: entry.title || entry.topicKey || '未命名范文档案',
+    meta: `${entry.sourceFile || mode}｜${entry.yearLabel || '年份未标'}｜${entry.topicType || '题型未标'}｜${entry.themeTag || '母题未标'}`,
+    why: `${mode}：${reasons}`,
+    visibleAction: weakFocus.action,
+    selfCheck: `看完后回到自己的第${weakParagraph}段，只检查“${weakFocus.key}”这一项：有没有题眼、有无机制解释、有无边界收束。`,
+    location: entry.wikiPath ? `Obsidian 定位：[[${entry.wikiPath}]]` : `Obsidian 文件：${entry.notePath || '未记录路径'}`,
+    matchScore: matched?.score || entry.matchScore || 0
+  };
+}
+
+function buildObsidianFallbackEntries(index, topic, draft, analysis) {
+  const topicTypeName = normalizeObsidianTopicTypeName(analysis?.topicType?.name || detectTopicType(topic).name);
+  const inferredTheme = inferObsidianThemeTag(topic, draft);
+  return index
+    .map((entry) => {
+      const entryTypeName = normalizeObsidianTopicTypeName(entry.topicType);
+      let score = 0;
+      const reasons = [];
+      if (topicTypeName && entryTypeName === topicTypeName) {
+        score += 18;
+        reasons.push(`同题型兜底：${entryTypeName}`);
+      }
+      if (inferredTheme && entry.themeTag === inferredTheme) {
+        score += 14;
+        reasons.push(`同母题兜底：${inferredTheme}`);
+      }
+      if (score > 0 && /202[3-6]|2024|2025/.test(String(entry.yearLabel || entry.packTitle || entry.sourceFile || ''))) {
+        score += 3;
+      }
+      return { ...entry, matchScore: score, matchReasons: reasons };
+    })
+    .filter((entry) => entry.matchScore > 0)
+    .sort((a, b) => b.matchScore - a.matchScore)
+    .slice(0, 3);
 }
 
 function buildFallbackVisibleExampleSuggestions(topic, analysis, report) {
@@ -4534,32 +4676,33 @@ function buildFallbackVisibleExampleSuggestions(topic, analysis, report) {
 async function buildVisibleObsidianSuggestions(topic, draft, analysis, report) {
   const weakFocus = getTeacherReportWeakFocus(report);
   const index = await loadObsidianEntryIndex();
-  const entries = index
+  const scoredEntries = index
     .map((entry) => {
       const matched = scoreObsidianEntryForEssay(entry, topic, draft, analysis);
       return { ...entry, matchScore: matched.score, matchReasons: matched.reasons };
     })
     .filter((entry) => entry.matchScore > 0)
-    .sort((a, b) => b.matchScore - a.matchScore)
-    .slice(0, 3);
+    .sort((a, b) => b.matchScore - a.matchScore);
+  let entries = scoredEntries.slice(0, 3);
+  let mode = index.length ? `已加载 ${index.length} 篇 Obsidian 档案` : 'Obsidian索引未加载';
+
+  if (!entries.length && index.length) {
+    entries = buildObsidianFallbackEntries(index, topic, draft, analysis);
+    mode = `已加载 ${index.length} 篇 Obsidian 档案，按邻近题型/母题推荐`;
+  }
 
   if (!entries.length) {
     return buildFallbackVisibleExampleSuggestions(topic, analysis, report);
   }
 
-  return entries.map((entry, index) => {
-    const reasons = entry.matchReasons?.length ? entry.matchReasons.join('；') : '题型或主题接近';
-    return {
-      rank: index + 1,
-      title: entry.title || entry.topicKey || '未命名范文档案',
-      meta: `${entry.sourceFile || 'Obsidian范文库'}｜${entry.yearLabel || '年份未标'}｜${entry.topicType || '题型未标'}｜${entry.themeTag || '母题未标'}`,
-      why: reasons,
-      visibleAction: weakFocus.action,
-      selfCheck: `看完后回到自己的第${report.paragraphRows?.[0]?.paragraph || 2}段，只检查“${weakFocus.key}”这一项，不要整篇重写。`,
-      location: entry.wikiPath ? `Obsidian 定位：[[${entry.wikiPath}]]` : `Obsidian 文件：${entry.notePath || '未记录路径'}`,
-      matchScore: entry.matchScore
-    };
-  });
+  return entries.map((entry, idx) => buildObsidianVisibleItem(
+    entry,
+    idx,
+    weakFocus,
+    report,
+    { score: entry.matchScore, reasons: entry.matchReasons || [] },
+    mode
+  ));
 }
 
 function renderVisibleObsidianSuggestionBlock(items) {
@@ -6294,9 +6437,17 @@ function initScrollEffects() {
 
 function detectTopicType(topic) {
   const text = topic || '';
+  const coreText = text
+    .replace(/请写一篇文章/g, '')
+    .replace(/谈谈你对/g, '')
+    .replace(/谈谈你的/g, '')
+    .replace(/认识和思考|认识与思考/g, '')
+    .replace(/认识|思考/g, '');
   if (isExpoThemeTopic(text)) return { code: 'method', name: '主题设计论证型' };
-  if (/(还是|与|和|之间|对立)/.test(text)) return { code: 'relation', name: '关系辩证型' };
-  if (/(是否|应不应该|值得|好不好|应该)/.test(text)) return { code: 'value', name: '价值判断型' };
+  if (/(还是|之间|对立|既.*又|一方面.*另一方面|自由.*不自由|坚硬.*柔软|一切都会过去.*一切都不会过去)/.test(coreText)) return { code: 'relation', name: '关系辩证型' };
+  if (/[\u4e00-\u9fa5]{1,8}(与|和)[\u4e00-\u9fa5]{1,8}/.test(coreText) && !/(认识|思考)/.test(coreText)) return { code: 'relation', name: '关系辩证型' };
+  if (/(价值|认可度|高下|被需要|有用|无用|值得|应不应该|好不好|应该|意义)/.test(text)) return { code: 'value', name: '价值判断型' };
+  if (/(是否|吗|仅仅|必定|怎样|如何|为什么|何以)/.test(text)) return { code: 'problem', name: '问题式命题' };
   if (/(如何|怎么|为什么|路径|方法)/.test(text)) return { code: 'method', name: '方法路径型' };
   return { code: 'phenomenon', name: '现象思辨型' };
 }
