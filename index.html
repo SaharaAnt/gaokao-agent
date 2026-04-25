@@ -3,123 +3,173 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>上海高考作文 AI Agent</title>
+  <title>上海高考作文助手</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;900&family=ZCOOL+KuaiLe&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="styles.css?v=55" />
+    <link rel="stylesheet" href="styles.css?v=56" />
 </head>
 <body>
   <div class="bg-particles" id="particles"></div>
 
   <header class="hero">
     <div class="hero-content">
-      <div class="hero-badge">上海高考 · 2000-2025</div>
-      <h1 class="hero-title">哲学思维<br/>知识导航</h1>
-      <p class="hero-subtitle">25年高考作文核心哲学概念 · 交互式学习卡片</p>
+      <div class="hero-badge">上海高考作文 · 备考助手</div>
+      <h1 class="hero-title">把审题、成文、批改<br/>收进一张安静的书桌</h1>
+      <p class="hero-subtitle">先抓题眼，再写草稿，再看问题，最后专项训练。</p>
       <div class="hero-stats">
         <div class="stat"><span class="stat-number" data-target="26">0</span><span class="stat-label">年真题</span></div>
-        <div class="stat"><span class="stat-number" data-target="6">0</span><span class="stat-label">哲学体系</span></div>
-        <div class="stat"><span class="stat-number" data-target="18">0</span><span class="stat-label">核心概念</span></div>
-        <div class="stat"><span class="stat-number" data-target="9">0</span><span class="stat-label">思维模型</span></div>
+        <div class="stat"><span class="stat-number" data-target="3">0</span><span class="stat-label">主流程</span></div>
+        <div class="stat"><span class="stat-number" data-target="18">0</span><span class="stat-label">方法卡</span></div>
+        <div class="stat"><span class="stat-number" data-target="9">0</span><span class="stat-label">训练模型</span></div>
       </div>
     </div>
   </header>
 
-  <nav class="category-nav" id="categoryNav">
-    <div class="nav-inner">
-      <button class="nav-btn active" data-category="all">全部</button>
-      <button class="nav-btn" data-category="dialectics">⚖️ 辩证法</button>
-      <button class="nav-btn" data-category="epistemology">🧠 认识论</button>
-      <button class="nav-btn" data-category="axiology">💎 价值论</button>
-      <button class="nav-btn" data-category="ethics">🤝 伦理学</button>
-      <button class="nav-btn" data-category="other">🎨 其他</button>
-      <button class="nav-btn" data-category="thinking">🦴 思维模型</button>
-    </div>
+  <nav class="page-directory" aria-label="页面目录">
+    <a href="#agentWorkbench">
+      <span>01</span>
+      <strong>写作工作台</strong>
+      <em>题目、草稿、批改</em>
+    </a>
+    <a href="#cardsSection">
+      <span>02</span>
+      <strong>方法卡片</strong>
+      <em>概念与落地写法</em>
+    </a>
+    <a href="#timeline">
+      <span>03</span>
+      <strong>真题时间线</strong>
+      <em>按年份与题型训练</em>
+    </a>
   </nav>
-
-  <main class="cards-container" id="cardsContainer"></main>
 
   <section class="agent-section" id="agentWorkbench">
     <div class="agent-header">
-      <h2 class="section-title">作文题 AI Agent 工作台</h2>
-      <p class="agent-subtitle">输入题目后，生成审题策略、防跑题检查与评分报告</p>
+      <p class="section-kicker">主流程</p>
+      <h2 class="section-title">写作工作台</h2>
+      <p class="agent-subtitle">按“审题 → 草稿 → 批改 → 训练”走，不把工具一股脑推给孩子。</p>
     </div>
 
     <div class="agent-panel">
-      <label class="agent-label" for="essayTopicInput">作文题目（或关键词）</label>
-      <textarea id="essayTopicInput" class="agent-textarea" placeholder="例如：一个人乐意去探索陌生世界，仅仅是因为好奇心吗？"></textarea>
+      <details class="workspace-step" open>
+        <summary>
+          <span class="step-no">01</span>
+          <span><strong>题目与成文</strong><em>先分析题眼，再决定是否生成范文或抽题训练</em></span>
+        </summary>
+        <label class="agent-label" for="essayTopicInput">作文题目（或关键词）</label>
+        <textarea id="essayTopicInput" class="agent-textarea" placeholder="例如：一个人乐意去探索陌生世界，仅仅是因为好奇心吗？"></textarea>
 
-      <div class="agent-actions">
-        <button id="analyzeTopicBtn" class="agent-btn primary">分析题目</button>
-        <button id="generateFullEssayBtn" class="agent-btn primary">一键生成800-850字范文</button>
-        <button id="generateTieredEssayBtn" class="agent-btn ghost">同题三档范文</button>
-        <select id="casePoolSelect" class="timeline-select" title="案例素材池">
-          <option value="auto">案例素材池：自动匹配</option>
-          <option value="tech">案例素材池：科技创新</option>
-          <option value="edu">案例素材池：教育成长</option>
-          <option value="culture">案例素材池：文化传播</option>
-          <option value="society">案例素材池：社会治理</option>
-          <option value="examplelib">案例素材池：上海范例库</option>
-          <option value="mycards">案例素材池：我的素材卡</option>
-        </select>
-        <button id="sampleTopicBtn" class="agent-btn ghost">填充示例</button>
-        <button id="randomTopicBtn" class="agent-btn ghost">一键抽题训练</button>
-        <button id="showDemoCardBtn" class="agent-btn ghost">加载示范题卡</button>
-        <button id="copyAgentResultBtn" class="agent-btn ghost">复制结果</button>
-      </div>
+        <div class="agent-actions primary-actions">
+          <button id="analyzeTopicBtn" class="agent-btn primary">分析题目</button>
+          <button id="generateFullEssayBtn" class="agent-btn primary">生成800-850字范文</button>
+          <button id="generateTieredEssayBtn" class="agent-btn ghost">同题三档范文</button>
+          <select id="casePoolSelect" class="timeline-select" title="案例素材池">
+            <option value="auto">案例素材池：自动匹配</option>
+            <option value="tech">科技创新</option>
+            <option value="edu">教育成长</option>
+            <option value="culture">文化传播</option>
+            <option value="society">社会治理</option>
+            <option value="examplelib">上海范例库</option>
+            <option value="mycards">我的素材卡</option>
+          </select>
+        </div>
+        <div class="agent-actions quiet-actions">
+          <button id="sampleTopicBtn" class="agent-btn ghost">填充示例</button>
+          <button id="randomTopicBtn" class="agent-btn ghost">抽题训练</button>
+          <button id="showDemoCardBtn" class="agent-btn ghost">示范题卡</button>
+          <button id="copyAgentResultBtn" class="agent-btn ghost">复制结果</button>
+        </div>
+      </details>
 
-      <div class="essay-library">
-        <div class="essay-library-title">范文列表</div>
-        <div class="essay-filter-bar" id="essayFilterBar"></div>
-        <div class="essay-library-list" id="essaySampleList"></div>
-      </div>
+      <details class="workspace-step" open>
+        <summary>
+          <span class="step-no">02</span>
+          <span><strong>草稿与批改</strong><em>把作文放进来，只指出问题，不替孩子改全文</em></span>
+        </summary>
+        <label class="agent-label draft-label" for="essayDraftInput">作文草稿（用于评分与防跑题检查）</label>
+        <textarea id="essayDraftInput" class="agent-textarea draft" placeholder="把草稿粘贴在这里"></textarea>
 
-      <div class="material-card-lab example-card-lab" id="exampleTrainingLab">
-        <div class="essay-library-title">上海范例训练库（内置）</div>
-        <p class="material-card-tip">已把《作文范例 25-26》中的题目解析、佳作亮点和教师点评提炼成训练卡，可直接查看、练此题、收进素材卡并参与范文生成。</p>
-        <div id="exampleTrainingList" class="material-card-list"></div>
-      </div>
-
-      <label class="agent-label draft-label" for="essayDraftInput">作文草稿（用于评分与防跑题检查）</label>
-      <textarea id="essayDraftInput" class="agent-textarea draft" placeholder="把草稿粘贴在这里"></textarea>
-
-      <div class="handwriting-panel" id="handwritingPanel">
-        <div class="handwriting-panel-head">
-          <div>
-            <div class="essay-library-title">手写作文图片（可选）</div>
-            <p class="material-card-tip">最多可上传5张手写作文照片。点击“草稿评分”或“习作精批”后，系统会自动进行浏览器端 OCR；如果草稿框还是空的，会先尝试把手写正文自动识别并回填，再继续评分或精批。首次识别需要联网加载模型。</p>
+        <div class="handwriting-panel" id="handwritingPanel">
+          <div class="handwriting-panel-head">
+            <div>
+              <div class="essay-library-title">手写作文图片（可选）</div>
+              <p class="material-card-tip">最多上传5张。点击“草稿评分”或“习作精批”时会自动 OCR；如果草稿框为空，会先尝试识别并回填。</p>
+            </div>
+            <span id="handwritingStatusBadge" class="handwriting-status-badge">未上传</span>
           </div>
-          <span id="handwritingStatusBadge" class="handwriting-status-badge">未上传</span>
+          <div class="handwriting-upload-row">
+            <input id="handwritingImageInput" class="material-input" type="file" accept="image/*" multiple />
+            <button id="handwritingOcrFillBtn" class="agent-btn primary" type="button">识别正文</button>
+            <button id="clearHandwritingImageBtn" class="agent-btn ghost" type="button">清空图片</button>
+          </div>
+          <p id="handwritingOcrStatus" class="handwriting-ocr-status">未上传手写图片时，书写项暂按中档估计；最多支持上传5张。</p>
+          <div id="handwritingPreviewList" class="handwriting-preview-list">
+            <div class="handwriting-empty">暂未上传图片</div>
+          </div>
         </div>
-        <div class="handwriting-upload-row">
-          <input id="handwritingImageInput" class="material-input" type="file" accept="image/*" multiple />
-          <button id="handwritingOcrFillBtn" class="agent-btn primary" type="button">识别正文</button>
-          <button id="clearHandwritingImageBtn" class="agent-btn ghost" type="button">清空图片</button>
-        </div>
-        <p id="handwritingOcrStatus" class="handwriting-ocr-status">未上传手写图片时，书写项暂按中档估计；最多支持上传5张。</p>
-        <div id="handwritingPreviewList" class="handwriting-preview-list">
-          <div class="handwriting-empty">暂未上传图片</div>
-        </div>
-      </div>
 
-      <div class="agent-actions secondary">
-        <button id="offTopicCheckBtn" class="agent-btn ghost">防跑题检查</button>
-        <button id="scoreDraftBtn" class="agent-btn primary">草稿评分</button>
-        <button id="masterCritiqueBtn" class="agent-btn ghost">习作精批</button>
-        <button id="improveDraftBtn" class="agent-btn ghost">修改任务单</button>
-        <button id="weeklyDashboardBtn" class="agent-btn ghost">周训练看板</button>
-        <button id="regressionTestBtn" class="agent-btn ghost">回归测试</button>
-        <button id="baselineCheckBtn" class="agent-btn ghost">基础自检</button>
-      </div>
+        <div class="agent-actions secondary review-actions">
+          <button id="offTopicCheckBtn" class="agent-btn ghost">防跑题检查</button>
+          <button id="scoreDraftBtn" class="agent-btn primary">草稿评分</button>
+          <button id="masterCritiqueBtn" class="agent-btn ghost">习作精批</button>
+          <button id="improveDraftBtn" class="agent-btn ghost">修改任务单</button>
+          <button id="weeklyDashboardBtn" class="agent-btn ghost">周训练看板</button>
+          <button id="regressionTestBtn" class="agent-btn ghost">回归测试</button>
+          <button id="baselineCheckBtn" class="agent-btn ghost">基础自检</button>
+        </div>
+      </details>
+
+      <details class="workspace-step library-step">
+        <summary>
+          <span class="step-no">03</span>
+          <span><strong>范文与训练库</strong><em>需要对照时再打开，避免一上来分散注意力</em></span>
+        </summary>
+        <div class="library-grid">
+          <div class="essay-library">
+            <div class="essay-library-title">范文列表</div>
+            <div class="essay-filter-bar" id="essayFilterBar"></div>
+            <div class="essay-library-list" id="essaySampleList"></div>
+          </div>
+
+          <div class="material-card-lab example-card-lab" id="exampleTrainingLab">
+            <div class="essay-library-title">上海范例训练库（内置）</div>
+            <p class="material-card-tip">范例解析、佳作亮点和教师点评会参与范文生成，也能用于同题对照。</p>
+            <div id="exampleTrainingList" class="material-card-list"></div>
+          </div>
+        </div>
+      </details>
 
       <div id="agentResult" class="agent-result" aria-live="polite">
-        <p class="agent-empty">输入题目后，这里会生成结果。</p>
+        <p class="agent-empty">结果区。先输入题目，点击“分析题目”。</p>
       </div>
     </div>
   </section>
 
+  <section class="cards-section" id="cardsSection">
+    <div class="section-head-row">
+      <div>
+        <p class="section-kicker">工具库</p>
+        <h2 class="section-title">方法卡片</h2>
+        <p class="agent-subtitle">把抽象哲学概念转成可落地的作文动作。</p>
+      </div>
+    </div>
+    <nav class="category-nav" id="categoryNav">
+      <div class="nav-inner">
+        <button class="nav-btn active" data-category="all">全部</button>
+        <button class="nav-btn" data-category="dialectics">辩证法</button>
+        <button class="nav-btn" data-category="epistemology">认识论</button>
+        <button class="nav-btn" data-category="axiology">价值论</button>
+        <button class="nav-btn" data-category="ethics">伦理学</button>
+        <button class="nav-btn" data-category="other">其他</button>
+        <button class="nav-btn" data-category="thinking">思维模型</button>
+      </div>
+    </nav>
+    <main class="cards-container" id="cardsContainer"></main>
+  </section>
+
   <section class="timeline-section" id="timeline">
+    <p class="section-kicker">题库</p>
     <h2 class="section-title">命题演变总览</h2>
     <div id="evolutionOverview" class="evolution-overview"></div>
 
@@ -141,6 +191,6 @@
   </section>
 
     <script src="data.js?v=54"></script>
-    <script src="app.js?v=59"></script>
+    <script src="app.js?v=60"></script>
 </body>
 </html>

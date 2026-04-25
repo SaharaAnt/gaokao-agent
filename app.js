@@ -840,8 +840,8 @@ function initCards() {
             <div class="card-year-tags">${years.map((y) => `<span class="year-tag">${escapeHtml(y)}</span>`).join('')}</div>
           </div>
           <div class="card-foot">
-            <span class="card-foot-left">Frequency <em class="freq-dots">${renderFrequencyDots(freq)}</em></span>
-            <span class="card-foot-right">Click to flip</span>
+            <span class="card-foot-left">出现频次 <em class="freq-dots">${renderFrequencyDots(freq)}</em></span>
+            <span class="card-foot-right">点击翻面</span>
           </div>
         </div>
         <div class="card-back">
@@ -849,7 +849,7 @@ function initCards() {
           <ol class="card-back-list">${backPoints.map((p) => `<li>${escapeHtml(p)}</li>`).join('')}</ol>
           <div class="card-foot">
             <span class="card-foot-left">再点一次可翻回</span>
-            <span class="card-foot-right">Back</span>
+            <span class="card-foot-right">翻回正面</span>
           </div>
         </div>
       </div>`;
