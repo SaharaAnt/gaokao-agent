@@ -9,10 +9,11 @@ const TRAINING_SESSION_LIMIT = 120;
 const HANDWRITING_OCR_CDN = 'https://cdn.jsdelivr.net/npm/tesseract.js@v5.0.0/dist/tesseract.min.js';
 const HANDWRITING_OCR_WORKER = 'https://cdn.jsdelivr.net/npm/tesseract.js@v5.0.0/dist/worker.min.js';
 const HANDWRITING_OCR_CORE = 'https://cdn.jsdelivr.net/npm/tesseract.js-core@v5.0.0';
-const HANDWRITING_OCR_LANG = 'https://tessdata.projectnaptha.com/4.0.0/';
+const HANDWRITING_OCR_LANG = 'https://tessdata.projectnaptha.com/4.0.0';
 const HANDWRITING_MAX_FILES = 5;
 const HANDWRITING_ANALYSIS_MAX_WIDTH = 420;
 const HANDWRITING_OCR_MAX_WIDTH = 1600;
+const HANDWRITING_OCR_MIN_USEFUL_CHARS = 36;
 const HANDWRITING_SCAN_STATE = {
   pages: [],
   cacheKey: '',
@@ -385,19 +386,73 @@ async function loadImageElement(source) {
   });
 }
 
-async function createProcessedCanvas(source, maxWidth, threshold = 182, mode = 'binary') {
+function findPaperCropBounds(imageData, width, height) {
+  const data = imageData.data;
+  const colCounts = new Array(width).fill(0);
+  const rowCounts = new Array(height).fill(0);
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const offset = (y * width + x) * 4;
+      const r = data[offset];
+      const g = data[offset + 1];
+      const b = data[offset + 2];
+      const gray = r * 0.299 + g * 0.587 + b * 0.114;
+      const spread = Math.max(r, g, b) - Math.min(r, g, b);
+      if (gray > 142 && spread < 72) {
+        colCounts[x] += 1;
+        rowCounts[y] += 1;
+      }
+    }
+  }
+
+  const colMinRatio = 0.16;
+  const rowMinRatio = 0.12;
+  let left = 0;
+  let right = width - 1;
+  let top = 0;
+  let bottom = height - 1;
+  while (left < right && colCounts[left] / Math.max(height, 1) < colMinRatio) left += 1;
+  while (right > left && colCounts[right] / Math.max(height, 1) < colMinRatio) right -= 1;
+  while (top < bottom && rowCounts[top] / Math.max(width, 1) < rowMinRatio) top += 1;
+  while (bottom > top && rowCounts[bottom] / Math.max(width, 1) < rowMinRatio) bottom -= 1;
+
+  const padX = Math.round(width * 0.025);
+  const padY = Math.round(height * 0.025);
+  left = Math.max(0, left - padX);
+  right = Math.min(width - 1, right + padX);
+  top = Math.max(0, top - padY);
+  bottom = Math.min(height - 1, bottom + padY);
+  const cropWidth = right - left + 1;
+  const cropHeight = bottom - top + 1;
+  const cropArea = (cropWidth * cropHeight) / Math.max(width * height, 1);
+  if (cropWidth < width * 0.35 || cropHeight < height * 0.35 || cropArea < 0.22) {
+    return { left: 0, top: 0, width, height, cropped: false };
+  }
+  return { left, top, width: cropWidth, height: cropHeight, cropped: cropArea < 0.94 };
+}
+
+async function createProcessedCanvas(source, maxWidth, threshold = 182, mode = 'binary', cropPaper = true) {
   const img = await loadImageElement(source);
   const ratio = img.width > maxWidth ? maxWidth / img.width : 1;
   const width = Math.max(1, Math.round(img.width * ratio));
   const height = Math.max(1, Math.round(img.height * ratio));
+  const sourceCanvas = document.createElement('canvas');
+  sourceCanvas.width = width;
+  sourceCanvas.height = height;
+  const sourceCtx = sourceCanvas.getContext('2d', { willReadFrequently: true });
+  sourceCtx.fillStyle = '#ffffff';
+  sourceCtx.fillRect(0, 0, width, height);
+  sourceCtx.drawImage(img, 0, 0, width, height);
+  const rawImageData = sourceCtx.getImageData(0, 0, width, height);
+  const bounds = cropPaper ? findPaperCropBounds(rawImageData, width, height) : { left: 0, top: 0, width, height, cropped: false };
   const canvas = document.createElement('canvas');
-  canvas.width = width;
-  canvas.height = height;
+  canvas.width = bounds.width;
+  canvas.height = bounds.height;
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   ctx.fillStyle = '#ffffff';
-  ctx.fillRect(0, 0, width, height);
-  ctx.drawImage(img, 0, 0, width, height);
-  const imageData = ctx.getImageData(0, 0, width, height);
+  ctx.fillRect(0, 0, bounds.width, bounds.height);
+  ctx.drawImage(sourceCanvas, bounds.left, bounds.top, bounds.width, bounds.height, 0, 0, bounds.width, bounds.height);
+  const imageData = ctx.getImageData(0, 0, bounds.width, bounds.height);
   const data = imageData.data;
   for (let i = 0; i < data.length; i += 4) {
     const gray = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
@@ -420,13 +475,20 @@ async function createProcessedCanvas(source, maxWidth, threshold = 182, mode = '
   return canvas;
 }
 
-function pickBetterOcrResult(primary, fallback) {
-  const primaryText = String(primary?.data?.text || '');
-  const fallbackText = String(fallback?.data?.text || '');
-  const primaryUseful = primaryText.replace(/\s+/g, '').length;
-  const fallbackUseful = fallbackText.replace(/\s+/g, '').length;
-  if (fallbackUseful > primaryUseful * 1.25) return fallback;
-  return primaryUseful >= fallbackUseful ? primary : fallback;
+function scoreOcrResultCandidate(result) {
+  const text = String(result?.data?.text || '');
+  const compact = text.replace(/\s+/g, '');
+  const chineseCount = (compact.match(/[\u4e00-\u9fa5]/g) || []).length;
+  const validCount = (compact.match(/[0-9a-zA-Z\u4e00-\u9fa5，。！？；：“”‘’、,.!?;:'"()\[\]（）【】《》\-]/g) || []).length;
+  const noiseRatio = compact.length ? 1 - (validCount / compact.length) : 1;
+  const confidence = Number(result?.data?.confidence || 0);
+  return (chineseCount * 2.2) + (validCount * 0.25) + (confidence * 0.12) - (noiseRatio * 40);
+}
+
+function pickBestOcrResult(candidates) {
+  return candidates
+    .filter(Boolean)
+    .sort((a, b) => scoreOcrResultCandidate(b) - scoreOcrResultCandidate(a))[0] || candidates[0];
 }
 
 function analyzeBinaryCanvasMetrics(canvas) {
@@ -534,8 +596,9 @@ async function runHandwritingOcrAnalysis(draft) {
   for (let index = 0; index < HANDWRITING_SCAN_STATE.pages.length; index += 1) {
     const page = HANDWRITING_SCAN_STATE.pages[index];
     updateHandwritingUi('loading', `正在识别第${index + 1}/${HANDWRITING_SCAN_STATE.pages.length}页手写图片...`);
-    const ocrCanvas = await createProcessedCanvas(page.dataUrl, HANDWRITING_OCR_MAX_WIDTH, 176);
-    const grayOcrCanvas = await createProcessedCanvas(page.dataUrl, HANDWRITING_OCR_MAX_WIDTH, 168, 'gray');
+    const ocrCanvas = await createProcessedCanvas(page.dataUrl, HANDWRITING_OCR_MAX_WIDTH, 138);
+    const grayOcrCanvas = await createProcessedCanvas(page.dataUrl, HANDWRITING_OCR_MAX_WIDTH, 164, 'gray');
+    const softBinaryCanvas = await createProcessedCanvas(page.dataUrl, HANDWRITING_OCR_MAX_WIDTH, 178);
     const analysisCanvas = await createProcessedCanvas(page.dataUrl, HANDWRITING_ANALYSIS_MAX_WIDTH, 180);
     metricList.push(analyzeBinaryCanvasMetrics(analysisCanvas));
     const ocrOptions = {
@@ -549,11 +612,30 @@ async function runHandwritingOcrAnalysis(draft) {
         }
       }
     };
-    const result = await TesseractLib.recognize(ocrCanvas, 'chi_sim+eng', ocrOptions);
+    const result = await TesseractLib.recognize(ocrCanvas, 'chi_sim+eng', {
+      ...ocrOptions,
+      tessedit_pageseg_mode: '6',
+      preserve_interword_spaces: '1',
+      user_defined_dpi: '300'
+    });
+    const candidates = [result];
     const usefulLength = String(result?.data?.text || '').replace(/\s+/g, '').length;
-    const finalResult = usefulLength >= 12
-      ? result
-      : pickBetterOcrResult(result, await TesseractLib.recognize(grayOcrCanvas, 'chi_sim+eng', ocrOptions));
+    if (usefulLength < HANDWRITING_OCR_MIN_USEFUL_CHARS || scoreOcrResultCandidate(result) < 55) {
+      updateHandwritingUi('loading', `第${index + 1}页标准识别偏弱，正在尝试强化识别...`);
+      candidates.push(await TesseractLib.recognize(grayOcrCanvas, 'chi_sim+eng', {
+        ...ocrOptions,
+        tessedit_pageseg_mode: '6',
+        preserve_interword_spaces: '1',
+        user_defined_dpi: '300'
+      }));
+      candidates.push(await TesseractLib.recognize(softBinaryCanvas, 'chi_sim+eng', {
+        ...ocrOptions,
+        tessedit_pageseg_mode: '11',
+        preserve_interword_spaces: '1',
+        user_defined_dpi: '300'
+      }));
+    }
+    const finalResult = pickBestOcrResult(candidates);
     ocrPages.push({
       text: String(finalResult?.data?.text || ''),
       confidence: Number(finalResult?.data?.confidence || 0)
@@ -583,7 +665,11 @@ async function runHandwritingOcrAnalysis(draft) {
   const noiseRatio = computeOcrNoiseRatio(text);
   const overlapRatio = calculateTextOverlapRatio(text, draft);
   const overwriteRisk = classifyOverwriteRisk(metricSummary, confidence, noiseRatio);
-  updateHandwritingUi('done', `OCR完成：平均识别置信度约${Math.round(confidence)}%，疑似涂改风险${overwriteRisk}。`);
+  const usefulCharCount = text.replace(/\s+/g, '').length;
+  const qualityTip = usefulCharCount < HANDWRITING_SCAN_STATE.pages.length * 45
+    ? '识别文字偏少，建议正向拍摄、减少阴影，让作文纸占满画面。'
+    : '已提取到正文，可继续评分或精批。';
+  updateHandwritingUi('done', `OCR完成：平均识别置信度约${Math.round(confidence)}%，识别约${usefulCharCount}字，疑似涂改风险${overwriteRisk}。${qualityTip}`);
   return {
     text,
     confidence,
