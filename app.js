@@ -3723,8 +3723,10 @@ function injectTemplateIntoDraft(draft, sentence, kind) {
 function runOffTopicCheck(topic, draft) {
   const topicType = detectTopicType(topic);
   const topicPhrases = extractTopicPhrases(topic);
-  const paragraphs = splitParagraphs(draft);
-  const lower = draft.toLowerCase();
+  const reviewInfo = getReviewDraftInfo(topic, draft);
+  const reviewDraft = reviewInfo.draft;
+  const paragraphs = splitParagraphs(reviewDraft);
+  const lower = reviewDraft.toLowerCase();
   const matched = topicPhrases.filter((p) => lower.includes(p.toLowerCase()));
   const missed = topicPhrases.filter((p) => !lower.includes(p.toLowerCase()));
   const coverageMatrix = buildTopicEyeCoverageMatrix({ topic, topicType, topicPhrases, paragraphs });
@@ -3746,25 +3748,35 @@ function runOffTopicCheck(topic, draft) {
   });
 
   const weak = diagnostics.filter((x) => x.level === '偏题风险').length;
-  const scaffold = buildOffTopicScaffold({ topic, draft, topicType, topicPhrases, paragraphs });
-  const precision = buildPrecisionChecks({ topic, draft, topicType, topicPhrases, paragraphs, diagnostics });
+  const scaffold = buildOffTopicScaffold({ topic, draft: reviewDraft, topicType, topicPhrases, paragraphs });
+  const precision = buildPrecisionChecks({ topic, draft: reviewDraft, topicType, topicPhrases, paragraphs, diagnostics });
   const baseRiskPoints = (missed.length * 8) + (weak * 10) + (paragraphs.length < 3 ? 10 : 0);
   const qualityScore = Math.round(
     (scaffold.dimensions.reduce((sum, d) => sum + d.score, 0) / Math.max(scaffold.dimensions.length, 1)) * 0.72
       + (100 - baseRiskPoints) * 0.28
   );
   const precisionPenalty = Math.round((100 - precision.avgScore) * 0.18);
-  const riskScore = clamp(qualityScore - precisionPenalty, 0, 100);
+  const semanticBridgeScore = buildTopicSemanticBridgeScore(topic, reviewDraft, topicPhrases);
+  const expertSignals = assessExpertEssaySignals(topic, reviewDraft, { topicType, topicPhrases, semanticBridgeScore });
+  let riskScore = clamp(qualityScore - precisionPenalty + Math.round(semanticBridgeScore * 0.12), 0, 100);
+  if (expertSignals.score >= 72 && semanticBridgeScore >= 60) {
+    riskScore = Math.max(riskScore, Math.min(82, Math.round(expertSignals.score * 0.62 + semanticBridgeScore * 0.28)));
+  }
+  if (expertSignals.score >= 82 && semanticBridgeScore >= 72) {
+    riskScore = Math.max(riskScore, 76);
+  }
   const riskLevel = riskScore < 50 ? '高风险' : (riskScore < 75 ? '中风险' : '低风险');
-  const flawScan = scanArgumentFlaws({ topic, topicType, draft, topicPhrases, paragraphDiagnostics: diagnostics, paragraphs, scaffold, precision });
-  const paragraphAdvice = buildParagraphAdvice({ topic, topicType, draft, topicPhrases, paragraphs, diagnostics, scaffold, precision, coverageMatrix });
+  const flawScan = scanArgumentFlaws({ topic, topicType, draft: reviewDraft, topicPhrases, paragraphDiagnostics: diagnostics, paragraphs, scaffold, precision });
+  const paragraphAdvice = buildParagraphAdvice({ topic, topicType, draft: reviewDraft, topicPhrases, paragraphs, diagnostics, scaffold, precision, coverageMatrix });
   const lowDims = scaffold.dimensions.filter((d) => d.score < 65);
   const autoSuggestions = lowDims.slice(0, 4).map((d) => d.fix);
-  const triadGaps = buildTriadGapTips({ topic, draft, topicPhrases, scaffold, precision, missedCount: missed.length });
+  const triadGaps = buildTriadGapTips({ topic, draft: reviewDraft, topicPhrases, scaffold, precision, missedCount: missed.length });
 
   return {
     topic,
-    draft,
+    draft: reviewDraft,
+    originalDraft: draft,
+    reviewInfo,
     topicType,
     topicPhrases,
     expectedCategories: ['thinking', 'dialectics'],
@@ -3777,16 +3789,20 @@ function runOffTopicCheck(topic, draft) {
     coverageMatrix,
     precision,
     scaffold,
+    semanticBridgeScore,
+    expertSignals,
     flawScan,
     paragraphAdvice,
     triadGaps,
     evidence: [
+      reviewInfo.removedHeadings.length ? `已忽略标题/题记：${reviewInfo.removedHeadings.join('、')}` : '',
       `题眼覆盖：${matched.length}/${Math.max(topicPhrases.length, 1)}`,
+      `语义关联：${semanticBridgeScore}/100`,
       `段落数量：${paragraphs.length}`,
       `偏题段落：${weak}段`,
       `思辨脚手架：${scaffold.summary}`,
       `精准度核验：核心一致性${precision.coreConsistency.score} / 对立覆盖${precision.oppositionCoverage.score} / 升华质量${precision.risingQuality.score}`
-    ],
+    ].filter(Boolean),
     suggestions: [
       missed.length ? `补齐缺失题眼：${missed.slice(0, 3).join('、')}` : '题眼覆盖基本达标。',
       '每段首句都显式回扣题眼。',
@@ -4648,18 +4664,19 @@ function replaceParagraphLeadSentence(draft, paragraphIndex, newLeadSentence) {
 
 function scoreEssayDraft(topic, draft) {
   const offTopic = runOffTopicCheck(topic, draft);
-  const paragraphs = splitParagraphs(draft);
-  const sentenceCount = splitSentences(draft).length;
-  const wordCount = countWords(draft);
+  const reviewDraft = offTopic.draft || normalizeDraftForReview(topic, draft);
+  const paragraphs = splitParagraphs(reviewDraft);
+  const sentenceCount = splitSentences(reviewDraft).length;
+  const wordCount = countWords(reviewDraft);
   const dims = offTopic.scaffold?.dimensions || [];
   const d1 = dims.find((d) => d.id === 'd1')?.score || 0;
   const d2 = dims.find((d) => d.id === 'd2')?.score || 0;
   const d3 = dims.find((d) => d.id === 'd3')?.score || 0;
   const d5 = dims.find((d) => d.id === 'd5')?.score || 0;
   const d6 = dims.find((d) => d.id === 'd6')?.score || 0;
-  const logicCount = countMatches(draft, /(因为|所以|因此|由此|意味着|从而)/gi);
-  const evidenceCount = countMatches(draft, /(例如|比如|案例|以.*为例|数据)/gi);
-  const turnCount = countMatches(draft, /(诚然|然而|另一方面|同时|反过来|不过)/gi);
+  const logicCount = countMatches(reviewDraft, /(因为|所以|因此|由此|意味着|从而|这说明|关键在于|本质上|机制)/gi);
+  const evidenceCount = countMatches(reviewDraft, /(例如|比如|案例|以.*为例|数据|正如|从.*看|短视频|平台|人工智能|校园|社会)/gi);
+  const turnCount = countMatches(reviewDraft, /(诚然|然而|另一方面|同时|反过来|不过|并非|未必|但是)/gi);
 
   const relevance = clamp(Math.round((d1 * 0.45 + d2 * 0.25 + d5 * 0.3) / 5), 0, 20);
   const structure = clamp(Math.round(((paragraphs.length >= 3 ? 70 : 45) + Math.min(20, sentenceCount * 1.8) + Math.min(10, d6 * 0.1)) / 5), 0, 20);
@@ -4727,14 +4744,19 @@ function findSentenceLocation(draft, sentence) {
 function getCoreIntentBand(offTopic) {
   const riskScore = Number(offTopic?.riskScore || 0);
   const topicFit = Number((offTopic?.scaffold?.dimensions || []).find((d) => d.id === 'd1')?.score || 0);
-  const score = Math.round((riskScore * 0.55 + topicFit * 0.45) / 100 * 18);
-  if (riskScore >= 80 && topicFit >= 75) {
+  const bridge = Number(offTopic?.semanticBridgeScore || 0);
+  const expert = Number(offTopic?.expertSignals?.score || 0);
+  const calibratedFit = Math.max(topicFit, Math.round(bridge * 0.72 + expert * 0.18));
+  const calibratedRisk = Math.max(riskScore, expert >= 78 && bridge >= 65 ? 72 : 0);
+  const score = Math.round((calibratedRisk * 0.48 + calibratedFit * 0.36 + expert * 0.16) / 100 * 18);
+  if (calibratedRisk >= 80 && calibratedFit >= 75) {
     return { band: '一类', score: clamp(score, 15, 18), detail: '紧扣材料核心问法，未见明显偏题。' };
   }
-  if (riskScore >= 60 && topicFit >= 55) {
-    return { band: '二类', score: clamp(score, 11, 15), detail: '基本扣住材料，但局部段落开始离开题眼。' };
+  if (calibratedRisk >= 60 && calibratedFit >= 55) {
+    const note = offTopic?.reviewInfo?.removedHeadings?.length ? '系统已忽略标题/题记后评分；' : '';
+    return { band: '二类', score: clamp(score, 11, 15), detail: `${note}基本扣住材料，但局部段落还需更显性回扣题眼。` };
   }
-  if (riskScore >= 40 && topicFit >= 35) {
+  if (calibratedRisk >= 40 && calibratedFit >= 35) {
     return { band: '三类', score: clamp(score, 7, 11), detail: '能碰到材料边缘，但核心立意不稳，容易写散。' };
   }
   return { band: '四类', score: clamp(score, 0, 7), detail: '偏离材料核心明显，文章主要在自说自话。' };
@@ -4744,21 +4766,37 @@ function assessThesisLine(topic, draft, analysis) {
   const paragraphs = splitParagraphs(draft);
   const sentenceMap = getDraftSentenceMap(draft);
   const topicPhrases = analysis.topicPhrases || [];
-  const thesisPattern = /(我认为|在我看来|我更倾向于|关键在于|真正|不是|而是|因此|可见)/;
+  const thesisPattern = /(我认为|在我看来|我更倾向于|本文|主张|关键在于|真正|不是|而是|不在于|取决于|因此|可见|应当|需要|可以|不能|并非|未必|意义|本质)/;
   let thesisSentence = '';
   let thesisParagraph = -1;
-  sentenceMap.slice(0, 2).forEach((row) => {
-    if (thesisSentence) return;
-    const hit = row.sentences.find((sentence) => thesisPattern.test(sentence) || topicPhrases.some((phrase) => phrase && sentence.includes(phrase)));
-    if (hit) {
-      thesisSentence = hit;
-      thesisParagraph = row.index;
-    }
+  let bestScore = -1;
+  sentenceMap.slice(0, Math.min(4, sentenceMap.length)).forEach((row) => {
+    row.sentences.forEach((sentence) => {
+      const compactLen = String(sentence || '').replace(/\s+/g, '').length;
+      if (compactLen < 10 || compactLen > 130) return;
+      const topicHits = topicPhrases.filter((phrase) => phrase && sentence.includes(phrase)).length;
+      const stance = thesisPattern.test(sentence) ? 1 : 0;
+      const condition = /(前提|条件|边界|若|如果|当.*时|在.*下|并非|未必|不必|不能绝对|并不意味着)/.test(sentence) ? 1 : 0;
+      const relation = /(关系|机制|标准|价值|结果|代价|路径|张力|制约|转化|统一|平衡)/.test(sentence) ? 1 : 0;
+      const score = topicHits * 18 + stance * 20 + condition * 14 + relation * 12 + (row.index <= 1 ? 8 : 0) + (compactLen >= 22 ? 6 : 0);
+      if (score > bestScore) {
+        bestScore = score;
+        thesisSentence = sentence;
+        thesisParagraph = row.index;
+      }
+    });
   });
+  if (bestScore < 18) {
+    thesisSentence = '';
+    thesisParagraph = -1;
+  }
   const thesisKeywords = normalizeTopicPhrases(extractTopicPhrases(thesisSentence || analysis.thesis || topic));
-  const carryingParagraphs = paragraphs.filter((paragraph) => thesisKeywords.some((kw) => kw && paragraph.includes(kw))).length;
+  const carryingParagraphs = paragraphs.filter((paragraph) =>
+    [...topicPhrases.slice(0, 4), ...thesisKeywords.slice(0, 3)].some((kw) => kw && paragraph.includes(kw))
+  ).length;
   const carryRatio = paragraphs.length ? carryingParagraphs / paragraphs.length : 0;
-  const score = clamp((thesisSentence ? 4 : 1) + Math.round(carryRatio * 6), 0, 10);
+  const qualityBonus = thesisSentence && /(前提|条件|边界|不是.*而是|不在于.*而在于|取决于|并非|未必|关系|机制|标准)/.test(thesisSentence) ? 1 : 0;
+  const score = clamp((thesisSentence ? 5 : 1) + Math.round(carryRatio * 4) + qualityBonus, 0, 10);
   return {
     score,
     max: 10,
@@ -4773,15 +4811,17 @@ function assessThesisLine(topic, draft, analysis) {
 
 function assessArgumentLogic(draft) {
   const quoteCount = countMatches(draft, /(“[^”]{2,24}”|曾言|曾说|曾指出|正如|正所谓|孔子|鲁迅)/g);
-  const exampleCount = countMatches(draft, /(例如|比如|以.+?为例|案例|譬如|屈原|司马迁|AI|人工智能|短视频|社交媒体|航天)/g);
+  const exampleCount = countMatches(draft, /(例如|比如|以.+?为例|案例|譬如|从.+?看|屈原|司马迁|AI|人工智能|短视频|社交媒体|航天|校园|平台|技术|社会)/g);
   const metaphorCount = countMatches(draft, /(像|如同|仿佛|恰似|好比|不是.+而是.+)/g);
   const turnCount = countMatches(draft, /(诚然|然而|但是|不过|另一方面|同时|反过来)/g);
-  const logicCount = countMatches(draft, /(因为|所以|因此|由此|从而|意味着|这说明|可见)/g);
+  const logicCount = countMatches(draft, /(因为|所以|因此|由此|从而|意味着|这说明|可见|关键在于|其机制|本质上|原因在于|换言之)/g);
+  const abstractCount = countMatches(draft, /(价值|标准|机制|本质|关系|边界|前提|条件|主体|公共|现实|时代)/g);
   const score = clamp(
     Math.min(4, logicCount) +
     Math.min(3, turnCount) +
-    (quoteCount > 0 ? 2 : 0) +
+    (quoteCount > 0 ? 1 : 0) +
     (exampleCount > 0 ? 2 : 0) +
+    Math.min(2, Math.floor(abstractCount / 3)) +
     (metaphorCount > 0 ? 1 : 0),
     0,
     12
@@ -4792,17 +4832,19 @@ function assessArgumentLogic(draft) {
     quoteCount,
     exampleCount,
     metaphorCount,
-    detail: `引证${quoteCount}处，例证${exampleCount}处，比喻论证${metaphorCount}处；逻辑转折${turnCount}处，因果推进${logicCount}处。`
+    detail: `引证${quoteCount}处，例证${exampleCount}处，比喻论证${metaphorCount}处；逻辑转折${turnCount}处，因果推进${logicCount}处，抽象分析词${abstractCount}处。`
   };
 }
 
 function assessMaterialFreshness(draft) {
   const staleHits = STALE_MATERIAL_PATTERNS.filter((name) => draft.includes(name));
   const freshHits = CURRENT_MATERIAL_PATTERNS.filter((name) => draft.includes(name));
+  const realityHits = ['现实', '时代', '社会', '校园', '青年', '公共', '媒介', '传播', '消费', '技术'].filter((name) => draft.includes(name));
   let score = 6;
   if (freshHits.length) score += 2;
+  else if (realityHits.length >= 2) score += 1;
   if (staleHits.length && !freshHits.length) score -= 2;
-  if (!staleHits.length && !freshHits.length) score -= 1;
+  if (!staleHits.length && !freshHits.length && realityHits.length < 2) score -= 1;
   return {
     score: clamp(score, 0, 8),
     max: 8,
@@ -4812,7 +4854,7 @@ function assessMaterialFreshness(draft) {
       ? `检测到较常见素材：${staleHits.join('、')}；按约定扣2分。`
       : (freshHits.length
         ? `能看到较新的现实材料：${freshHits.join('、')}。`
-        : '未见明显过时素材，但现实材料的新鲜度还不够高。')
+        : (realityHits.length >= 2 ? `虽未出现热点名词，但有现实语境：${realityHits.slice(0, 4).join('、')}。` : '未见明显过时素材，但现实材料的新鲜度还不够高。'))
   };
 }
 
@@ -4900,6 +4942,134 @@ function buildParagraphIssueRowsForTeacher(topic, draft, offTopic, thesisCheck) 
     task: item.task,
     issues: item.issues || []
   })).slice(0, 5);
+}
+
+function getTeacherScoreCalibrationFloor({ draft, offTopic, thesis, argument, language, structure }) {
+  const signals = offTopic?.expertSignals || assessExpertEssaySignals(offTopic?.topic || '', draft, {
+    topicPhrases: offTopic?.topicPhrases || [],
+    semanticBridgeScore: offTopic?.semanticBridgeScore || 0
+  });
+  const bridge = Number(offTopic?.semanticBridgeScore || signals.bridge || 0);
+  const wordCount = countWords(draft);
+  if (wordCount < 500) return 0;
+  const stableThesis = Number(thesis?.score || 0) >= 6;
+  const stableArgument = Number(argument?.score || 0) >= 7;
+  const stableStructure = Number(structure?.score || 0) >= 5;
+  const languageOk = Number(language?.score || 0) >= 6;
+  if (signals.score >= 84 && bridge >= 72 && stableThesis && stableArgument && stableStructure && languageOk) return 58;
+  if (signals.score >= 76 && bridge >= 62 && stableArgument && stableStructure && languageOk) return 52;
+  if (signals.score >= 68 && bridge >= 52 && stableStructure) return 45;
+  return 0;
+}
+
+function detectMissingTitle(originalDraft, reviewInfo = {}) {
+  const removed = reviewInfo?.removedHeadings || [];
+  if (removed.length) return false;
+  const first = splitParagraphs(originalDraft)[0] || '';
+  const compact = first.replace(/\s+/g, '');
+  if (!compact) return true;
+  if (compact.length <= 26 && splitSentences(first).length <= 1 && !/[，,；;。！？!?]/.test(first)) return false;
+  return true;
+}
+
+function estimateTypoAndPunctuationPenalty(draft) {
+  const punctuationIssue = countMatches(draft, /(。。|，，|；；|！！|？？|、，|，。|,,|!!|\?\?)/g);
+  const quoteMismatch = countMatches(draft, /“/g) !== countMatches(draft, /”/g) ? 1 : 0;
+  const obviousTypos = countMatches(draft, /(的地得的|因该|再次|布冯在心底|错别字占位)/g);
+  return clamp(punctuationIssue + quoteMismatch + obviousTypos, 0, 3);
+}
+
+function getShanghaiOfficialBand(score) {
+  const n = Number(score || 0);
+  if (n >= 63) return '一类卷（63-70分）';
+  if (n >= 52) return '二类卷（52-62分）';
+  if (n >= 39) return '三类卷（39-51分）';
+  if (n >= 21) return '四类卷（21-38分）';
+  return '五类卷（20分以下）';
+}
+
+function determineOfficialScoreBand({ offTopic, thesis, argument, language, structure, material, wordCount }) {
+  const riskScore = Number(offTopic?.riskScore || 0);
+  const bridge = Number(offTopic?.semanticBridgeScore || 0);
+  const expert = Number(offTopic?.expertSignals?.score || 0);
+  const intentBand = offTopic?.expertSignals?.score >= 84 && bridge >= 72 ? '一类' : getCoreIntentBand(offTopic).band;
+  const thesisOk = Number(thesis?.score || 0) >= 8;
+  const thesisBasic = Number(thesis?.score || 0) >= 6;
+  const argumentStrong = Number(argument?.score || 0) >= 9;
+  const argumentBasic = Number(argument?.score || 0) >= 6;
+  const structureStrong = Number(structure?.score || 0) >= 7;
+  const structureBasic = Number(structure?.score || 0) >= 5;
+  const languageStrong = Number(language?.score || 0) >= 8;
+  const languageBasic = Number(language?.score || 0) >= 6;
+  const materialOk = Number(material?.score || 0) >= 6;
+
+  if (wordCount < 120) return { band: '五类卷（20分以下）', min: 0, max: 20, reason: '字数极少或只有标题，按五类卷处理。' };
+  if (riskScore < 35 && bridge < 35) return { band: '四类卷（21-38分）', min: 21, max: 38, reason: '偏离材料核心，先压入四类卷区间。' };
+  if (riskScore >= 78 && bridge >= 70 && expert >= 82 && thesisOk && argumentStrong && structureStrong && languageBasic) {
+    return { band: '一类卷（63-70分）', min: 63, max: 70, reason: '准确理解材料，立意与论证层次均达到一类卷条件。' };
+  }
+  if (riskScore >= 62 && bridge >= 55 && thesisBasic && argumentBasic && structureBasic && languageBasic) {
+    return { band: '二类卷（52-62分）', min: 52, max: 62, reason: '符合题意，中心明确，结构与语言基本稳定。' };
+  }
+  if (riskScore >= 42 && bridge >= 38 && structureBasic) {
+    return { band: '三类卷（39-51分）', min: 39, max: 51, reason: '基本符合题意，但立意、论证或语言仍有明显短板。' };
+  }
+  if (/(三类|二类|一类)/.test(intentBand) && materialOk && languageBasic && structureBasic) {
+    return { band: '三类卷（39-51分）', min: 39, max: 51, reason: '文章尚能围绕材料展开，但核心论证不够稳定。' };
+  }
+  return { band: '四类卷（21-38分）', min: 21, max: 38, reason: '内容空泛或扣题不稳定，按四类卷区间处理。' };
+}
+
+function computeShanghaiOfficialScore({ originalDraft, draft, offTopic, intent, thesis, argument, material, language, structure, handwriting, calibrationFloor }) {
+  const wordCount = countWords(draft);
+  const band = determineOfficialScoreBand({ offTopic, intent, thesis, argument, material, language, structure, wordCount });
+  const ratios = [
+    Number(intent?.score || 0) / Math.max(Number(intent?.max || 18), 1),
+    Number(thesis?.score || 0) / Math.max(Number(thesis?.max || 10), 1),
+    Number(argument?.score || 0) / Math.max(Number(argument?.max || 12), 1),
+    Number(material?.score || 0) / Math.max(Number(material?.max || 8), 1),
+    Number(language?.score || 0) / Math.max(Number(language?.max || 10), 1),
+    Number(structure?.score || 0) / Math.max(Number(structure?.max || 8), 1),
+    Number(handwriting?.score || 0) / Math.max(Number(handwriting?.max || 4), 1)
+  ];
+  const avgRatio = ratios.reduce((sum, x) => sum + clamp(x, 0, 1), 0) / ratios.length;
+  const expert = Number(offTopic?.expertSignals?.score || 0);
+  const bridge = Number(offTopic?.semanticBridgeScore || 0);
+  const qualityRatio = clamp(avgRatio * 0.62 + (expert / 100) * 0.24 + (bridge / 100) * 0.14, 0, 1);
+  let rawScore = Math.round(band.min + (band.max - band.min) * qualityRatio);
+  rawScore = Math.max(rawScore, Number(calibrationFloor || 0));
+
+  const deductions = [];
+  if (wordCount < 600) {
+    rawScore = Math.min(rawScore, 36);
+    deductions.push('字数不足600字，上限控制在36分以内。');
+  } else if (wordCount < 800) {
+    const gapPenalty = Math.min(6, Math.ceil((800 - wordCount) / 60));
+    rawScore -= gapPenalty;
+    deductions.push(`未满800字，扣${gapPenalty}分。`);
+  }
+  if (detectMissingTitle(originalDraft, offTopic?.reviewInfo)) {
+    rawScore -= 2;
+    deductions.push('未识别到标题，扣2分。');
+  }
+  const typoPenalty = estimateTypoAndPunctuationPenalty(draft);
+  if (typoPenalty) {
+    rawScore -= typoPenalty;
+    deductions.push(`疑似错别字/标点问题扣${typoPenalty}分。`);
+  }
+
+  const finalScore = clamp(rawScore, 0, 70);
+  return {
+    score: finalScore,
+    band: getShanghaiOfficialBand(finalScore),
+    initialBand: band.band,
+    bandReason: band.reason,
+    wordCount,
+    deductions,
+    qualityRatio: Math.round(qualityRatio * 100),
+    noTitle: detectMissingTitle(originalDraft, offTopic?.reviewInfo),
+    typoPenalty
+  };
 }
 
 function buildTeacherShortComment(report) {
@@ -5238,18 +5408,33 @@ function renderVisibleObsidianSuggestionBlock(items) {
 async function buildShanghaiTeacherReviewReport(topic, draft, options = {}) {
   const analysis = analyzeEssayTopic(topic);
   const offTopic = runOffTopicCheck(topic, draft);
+  const reviewDraft = offTopic.draft || normalizeDraftForReview(topic, draft);
   const intent = getCoreIntentBand(offTopic);
-  const thesis = assessThesisLine(topic, draft, analysis);
-  const argument = assessArgumentLogic(draft);
-  const material = assessMaterialFreshness(draft);
-  const language = assessLanguageExpression(topic, draft, analysis);
-  const structure = assessStructureDraft(draft, analysis);
-  const handwriting = options.precomputedHandwriting || await assessHandwritingByOCR(draft);
-  const total = intent.score + thesis.score + argument.score + material.score + language.score + structure.score + handwriting.score;
-  const paragraphRows = buildParagraphIssueRowsForTeacher(topic, draft, offTopic, thesis);
+  const thesis = assessThesisLine(topic, reviewDraft, analysis);
+  const argument = assessArgumentLogic(reviewDraft);
+  const material = assessMaterialFreshness(reviewDraft);
+  const language = assessLanguageExpression(topic, reviewDraft, analysis);
+  const structure = assessStructureDraft(reviewDraft, analysis);
+  const handwriting = options.precomputedHandwriting || await assessHandwritingByOCR(reviewDraft);
+  const calibratedFloor = getTeacherScoreCalibrationFloor({ draft: reviewDraft, offTopic, intent, thesis, argument, material, language, structure });
+  const officialScore = computeShanghaiOfficialScore({
+    originalDraft: draft,
+    draft: reviewDraft,
+    offTopic,
+    intent,
+    thesis,
+    argument,
+    material,
+    language,
+    structure,
+    handwriting,
+    calibrationFloor: calibratedFloor
+  });
+  const paragraphRows = buildParagraphIssueRowsForTeacher(topic, reviewDraft, offTopic, thesis);
   const report = {
     topic,
-    draft,
+    draft: reviewDraft,
+    originalDraft: draft,
     analysis,
     offTopic,
     intent,
@@ -5260,7 +5445,9 @@ async function buildShanghaiTeacherReviewReport(topic, draft, options = {}) {
     structure,
     handwriting,
     paragraphRows,
-    total70: clamp(total, 0, 70)
+    calibrationFloor: calibratedFloor,
+    officialScore,
+    total70: officialScore.score
   };
   report.comment80 = buildTeacherShortComment(report);
   report.suggestions = buildTeacherRevisionSuggestions(report);
@@ -5517,6 +5704,7 @@ function renderTeacherScoreReport(report, container) {
   const goodRows = renderSentenceQualityItems(sentenceQuality.goodItems || [], 'good');
   const weakRows = renderSentenceQualityItems(sentenceQuality.badItems || [], 'bad');
   const suggestionRows = (report.suggestions || []).map((item) => `<li>${escapeHtml(item)}</li>`).join('');
+  const deductionRows = (report.officialScore?.deductions || []).map((item) => `<li>${escapeHtml(item)}</li>`).join('');
   const errorBookPanel = renderErrorBookTrainingPanel(buildTeacherErrorBookSummary(report));
   const eightTrainingPanel = renderTeacherEightTrainingPanel(report.analysis, report);
 
@@ -5525,9 +5713,18 @@ function renderTeacherScoreReport(report, container) {
       <h3>上海模考阅卷报告</h3>
       <div class="agent-tags">
         <span class="agent-tag">总分：${report.total70}/70</span>
-        <span class="agent-tag">立意档次：${escapeHtml(report.intent.band)}</span>
+        <span class="agent-tag">分档：${escapeHtml(report.officialScore?.band || report.intent.band)}</span>
+        <span class="agent-tag">初判：${escapeHtml(report.officialScore?.initialBand || report.intent.band)}</span>
         <span class="agent-tag risk ${normalizeRiskClass(report.offTopic?.riskLevel || '中')}">偏题风险：${escapeHtml(report.offTopic?.riskLevel || '中')}</span>
       </div>
+    </div>
+    <div class="agent-result-block">
+      <h4>上海分档赋分依据</h4>
+      <p><strong>先定档</strong>：${escapeHtml(report.officialScore?.initialBand || report.intent.band)}｜${escapeHtml(report.officialScore?.bandReason || report.intent.detail)}</p>
+      <p><strong>档内质量</strong>：${escapeHtml(String(report.officialScore?.qualityRatio ?? '--'))}/100｜字数：${escapeHtml(String(report.officialScore?.wordCount ?? countWords(report.draft)))}</p>
+      <p><strong>扣分项</strong></p>
+      <ul>${deductionRows || '<li>暂无标题、字数、错别字类硬扣分。</li>'}</ul>
+      <p class="agent-para-issues">评分按上海卷五档：一类63-70、二类52-62、三类39-51、四类21-38、五类20以下；先判档，再档内赋分。</p>
     </div>
     ${renderTeacherClosedLoopPanel(report, 'score')}
     ${eightTrainingPanel}
@@ -5570,6 +5767,7 @@ function renderTeacherCritiqueReport(report, container) {
   const sentenceQuality = analyzeSentenceQuality(report.topic, report.draft, report.analysis?.topicPhrases || report.offTopic?.topicPhrases || []);
   const goodRows = renderSentenceQualityItems(sentenceQuality.goodItems || [], 'good');
   const badRows = renderSentenceQualityItems(sentenceQuality.badItems || [], 'bad');
+  const deductionRows = (report.officialScore?.deductions || []).map((item) => `<li>${escapeHtml(item)}</li>`).join('');
   const errorBookPanel = renderErrorBookTrainingPanel(buildTeacherErrorBookSummary(report));
   const paragraphCoachRows = renderCritiqueParagraphCoachRows(report);
   const eightTrainingPanel = renderTeacherEightTrainingPanel(report.analysis, report);
@@ -5593,9 +5791,15 @@ function renderTeacherCritiqueReport(report, container) {
       <h3>阅卷老师精批</h3>
       <div class="agent-tags">
         <span class="agent-tag">总分：${report.total70}/70</span>
-        <span class="agent-tag">立意档次：${escapeHtml(report.intent.band)}</span>
+        <span class="agent-tag">分档：${escapeHtml(report.officialScore?.band || report.intent.band)}</span>
         <span class="agent-tag">书写项：${report.handwriting.score}/${report.handwriting.max}</span>
       </div>
+    </div>
+    <div class="agent-result-block">
+      <h4>上海分档赋分依据</h4>
+      <p><strong>先定档</strong>：${escapeHtml(report.officialScore?.initialBand || report.intent.band)}｜${escapeHtml(report.officialScore?.bandReason || report.intent.detail)}</p>
+      <p><strong>硬扣分</strong></p>
+      <ul>${deductionRows || '<li>暂无标题、字数、错别字类硬扣分。</li>'}</ul>
     </div>
     ${renderTeacherClosedLoopPanel(report, 'critique')}
     ${eightTrainingPanel}
@@ -6205,6 +6409,38 @@ async function runRegressionSuite() {
     });
   } catch (err) {
     cases.push({ name: '老师评分报告可生成', ok: false, detail: `异常：${err?.message || '未知错误'}` });
+  }
+
+  try {
+    const topic = '由“专”到“传”，必定要经过“转”吗？';
+    const draft = [
+      '为了精华的浓缩。',
+      '',
+      '专业表达要成为传世之作，当然需要面对公共世界，但这并不等于必定经过流量式转发。所谓专，是知识共同体内部的精密表达；所谓转，是面向大众的转译和传播；所谓传，则是经由时间、实践和读者反复筛选后留下的价值。',
+      '',
+      '许多专业文章确实需要转译。高质量的转并不是稀释，而是把证据、概念和因果关系重新组织，使知识能被更多人理解。因此，转的价值在于打开专业知识的公共入口，而不是简单追求点击率。',
+      '',
+      '然而，转并不天然通向传。短视频平台上有些内容传播极广，却因为迎合情绪而牺牲复杂性；相反，有些思想著作起初只在小范围中流通，却凭借问题意识和解释力长期留下来。',
+      '',
+      '进一步看，当代社会最需要建设的不是更热闹的转，而是更负责任的转译。它至少包含三个边界：不偷换核心概念，不截断证据链条，不把复杂问题包装成简单立场。只有满足这些条件，转才可能成为公共理性的桥梁，使专不再封闭，也使传不沦为空名。',
+      '',
+      '现实中的许多争论也说明了这一点。有些科学知识经过耐心解释，能帮助公众形成更清醒的判断；有些内容虽然被大量转发，却因为标题化、情绪化而损害原意。前者让专业知识获得公共生命，后者则让知识沦为噪音。因此，判断转是否有价值，不能看它传播得多快，而要看它是否保留了问题的复杂性和判断的责任感。',
+      '',
+      '由此再回望“传”，它并不是传播链条的最后一个热度数字，而是作品在不同时代仍能被重新理解、重新使用的能力。专业深度提供了这种能力的根，公共转译提供了可能扩散的枝叶，但真正决定它能否留下来的，是它是否回应了人的长久困惑，是否能在新的现实中继续产生解释力。',
+      '',
+      '因此，专、转、传之间不是线性流水线，而是一组相互校正的关系。没有专，转容易空心化；没有恰当的转，专可能停留在圈层内部；没有传的尺度，转又容易被流量牵引。高分论证要处理的正是这种张力，而不是把其中任何一环绝对化。',
+      '',
+      '对今天的写作者而言，这一题也提醒我们：表达不能只追求专业壁垒，也不能只迎合传播效率。真正成熟的表达，应当既有知识的精确度，又有面向公共生活的耐心，还要经得起时间的再次追问。这样的转，才可能服务于传；这样的专，也才不会成为自我封闭的姿态。',
+      '',
+      '所以，由专到传并不必定经过转，但在今天的传播环境中，高质量的转往往是重要的中介机制。真正值得追求的，是在专业深度与公共可达之间建立张力平衡。'
+    ].join('\n');
+    const report = await buildShanghaiTeacherReviewReport(topic, draft);
+    const ok = report.total70 >= 52
+      && (report.offTopic.reviewInfo?.removedHeadings || []).length >= 1
+      && report.offTopic.semanticBridgeScore >= 70;
+    cases.push({ name: '标题误判校准', ok, detail: ok ? `标题已忽略，校准后 ${report.total70}/70` : `校准不足：${report.total70}/70，标题忽略${(report.offTopic.reviewInfo?.removedHeadings || []).length}项` });
+  } catch (err) {
+    cases.push({ name: '标题误判校准', ok: false, detail: `异常：${err?.message || '未知错误'}` });
   }
 
   try {
@@ -7422,6 +7658,96 @@ function splitParagraphs(text) {
   return String(text || '').split(/\r?\n\r?\n+/).map((x) => x.trim()).filter(Boolean);
 }
 
+function isLikelyFrontMatterParagraph(paragraph, remainingText, topicPhrases = []) {
+  const raw = String(paragraph || '').trim();
+  const compact = raw.replace(/\s+/g, '').replace(/[《》“”"']/g, '');
+  if (!compact) return false;
+  if (String(remainingText || '').replace(/\s+/g, '').length < 180) return false;
+  const compactLen = compact.replace(/[，。！？；：,.!?;:、]/g, '').length;
+  const sentenceCount = splitSentences(raw).length;
+  const hasEssayMotion = /(我认为|在我看来|因此|然而|因为|所以|这说明|关键在于|本质|价值|现实|社会|时代|不是.*而是|并非|未必)/.test(raw);
+  const looksLikeAuthor = /(学校|中学|班|姓名|作者|指导老师|高[一二三]|初[一二三]|同学)/.test(raw);
+  const looksLikeTitle = compactLen <= 26 && sentenceCount <= 1 && !hasEssayMotion;
+  const sameAsTopic = topicPhrases.some((term) => term && compact === String(term).replace(/\s+/g, ''));
+  return looksLikeAuthor || sameAsTopic || looksLikeTitle;
+}
+
+function getReviewDraftInfo(topic, draft) {
+  const topicPhrases = normalizeTopicPhrases(extractTopicPhrases(topic));
+  const paragraphs = splitParagraphs(draft);
+  const removedHeadings = [];
+  let body = [...paragraphs];
+  let guard = 0;
+  while (body.length >= 2 && guard < 3) {
+    const remaining = body.slice(1).join('\n\n');
+    if (!isLikelyFrontMatterParagraph(body[0], remaining, topicPhrases)) break;
+    removedHeadings.push(body.shift());
+    guard += 1;
+  }
+  const cleaned = body.join('\n\n').trim() || String(draft || '').trim();
+  return { draft: cleaned, removedHeadings };
+}
+
+function normalizeDraftForReview(topic, draft) {
+  return getReviewDraftInfo(topic, draft).draft;
+}
+
+function getTopicRelatedTerms(topic, topicPhrases = []) {
+  const text = `${topic || ''} ${(topicPhrases || []).join(' ')}`;
+  const terms = [];
+  const add = (items) => terms.push(...items);
+  if (/专.*转.*传|专业文章|转发|传世/.test(text)) add(['专业', '通俗', '传播', '转发', '转译', '传世', '经典', '精华', '浓缩', '流量', '公共表达']);
+  if (/认可度|高下/.test(text)) add(['认可', '标准', '评价', '高下', '大众', '多数', '共识', '判断', '独立思考']);
+  if (/断舍离|真实所求|内心/.test(text)) add(['断舍离', '减法', '取舍', '冗余', '内心', '真实', '所求', '自我', '排序']);
+  if (/好奇心|陌生世界|探索/.test(text)) add(['好奇', '探索', '陌生', '未知', '动机', '责任', '求知', '世界']);
+  if (/转折|意想不到|无能为力|发展进程/.test(text)) add(['转折', '意外', '进程', '回应', '选择', '主动', '作为', '局限']);
+  if (/已有知识|综合|创新/.test(text)) add(['知识', '综合', '创新', '拼接', '融合', '生成', '创造', '解释力']);
+  if (/发问|结论/.test(text)) add(['发问', '问题', '结论', '思考', '追问', '判断', '成长']);
+  if (/时间|价值|沉淀/.test(text)) add(['时间', '价值', '沉淀', '检验', '实践', '认识', '发现']);
+  if (/自由|不自由|规则|责任/.test(text)) add(['自由', '限制', '规则', '责任', '选择', '边界', '主体']);
+  if (/被需要|自身需要/.test(text)) add(['需要', '被需要', '价值', '他人', '关系', '自我']);
+  return dedupeArray([
+    ...(topicPhrases || []).filter((term) => !/^(是否|必定|仅仅|对此|怎样)$/.test(term)),
+    ...terms
+  ]).slice(0, 18);
+}
+
+function buildTopicSemanticBridgeScore(topic, draft, topicPhrases = []) {
+  const related = getTopicRelatedTerms(topic, topicPhrases);
+  const text = String(draft || '');
+  if (!related.length) return 0;
+  const exactHits = (topicPhrases || []).filter((term) => term && term.length >= 2 && text.includes(term)).length;
+  const relatedHits = related.filter((term) => term && text.includes(term)).length;
+  const relationSignals = countMatches(text, /(关系|标准|价值|机制|本质|边界|条件|前提|转化|制约|实践|现实)/g);
+  return clamp(exactHits * 14 + relatedHits * 10 + Math.min(18, relationSignals * 3), 0, 100);
+}
+
+function assessExpertEssaySignals(topic, draft, options = {}) {
+  const paragraphs = splitParagraphs(draft);
+  const wordCount = countWords(draft);
+  const logicCount = countMatches(draft, /(因为|所以|因此|由此|从而|意味着|这说明|可见|关键在于|本质上|原因在于|换言之)/g);
+  const turnCount = countMatches(draft, /(诚然|然而|但是|不过|另一方面|同时|反过来|并非|未必|不能简单)/g);
+  const boundaryCount = countMatches(draft, /(前提|条件|边界|如果|若|当.*时|并不意味着|未必|不能绝对|限度)/g);
+  const realityCount = countMatches(draft, /(现实|社会|时代|生活|校园|平台|算法|技术|青年|公共|传播|消费|信息)/g);
+  const abstractCount = countMatches(draft, /(价值|标准|机制|本质|关系|主体|结构|判断|实践|公共|意义|逻辑)/g);
+  const thesisCue = countMatches(draft, /(关键在于|真正|不是.*而是|不在于.*而在于|取决于|应当|需要|可以|不能|并非|未必)/g);
+  const bridge = Number(options.semanticBridgeScore ?? buildTopicSemanticBridgeScore(topic, draft, options.topicPhrases || []));
+  const score = clamp(
+    (wordCount >= 760 ? 15 : (wordCount >= 600 ? 9 : 0))
+    + (paragraphs.length >= 4 ? 10 : (paragraphs.length >= 3 ? 6 : 0))
+    + Math.min(18, logicCount * 4)
+    + Math.min(12, turnCount * 4)
+    + Math.min(10, boundaryCount * 5)
+    + Math.min(12, realityCount * 3)
+    + Math.min(13, abstractCount * 2)
+    + Math.min(8, thesisCue * 3)
+    + Math.min(12, Math.round(bridge * 0.12)),
+    0,
+    100
+  );
+  return { score, wordCount, paragraphCount: paragraphs.length, logicCount, turnCount, boundaryCount, realityCount, abstractCount, thesisCue, bridge };
+}
+
 function splitSentences(text) {
   return String(text || '').split(/[。！？.!?；;]/).map((x) => x.trim()).filter(Boolean);
 }
@@ -7514,13 +7840,8 @@ function renderExamCountdown(el, sec) {
 }
 
 function getShanghaiBand(total) {
-  if (total >= 92) return '一类上（约65-70分）';
-  if (total >= 85) return '一类中（约60-64分）';
-  if (total >= 78) return '一类下（约56-59分）';
-  if (total >= 70) return '二类卷（约49-55分）';
-  if (total >= 62) return '三类卷（约42-48分）';
-  if (total >= 54) return '四类卷（约35-41分）';
-  return '五类卷（约34分及以下）';
+  const score70 = total > 70 ? Math.round(Number(total || 0) * 0.7) : Number(total || 0);
+  return getShanghaiOfficialBand(score70);
 }
 
 function normalizeRiskClass(level) {
