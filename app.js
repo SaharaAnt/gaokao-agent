@@ -4140,6 +4140,7 @@ function renderOffTopicReport(report, container) {
   container.innerHTML = `
     <div class="agent-result-head"><h3>防跑题诊断报告</h3><div class="agent-tags"><span class="agent-tag risk ${normalizeRiskClass(report.riskLevel)}">偏题风险：${report.riskLevel}</span><span class="agent-tag">扣题指数：${report.riskScore}/100</span></div></div>
     ${renderOffTopicTeacherPriorityPanel(report)}
+    ${renderOffTopicRedLinePanel(report)}
     <div class="agent-result-block"><h4>题眼覆盖矩阵</h4>${coverageMatrixRows}</div>
     <div class="agent-result-block"><h4>精准度核验（3项）</h4><div class="score-grid">${precisionRows}</div></div>
     <div class="agent-result-block"><h4>思辨脚手架（6维）</h4><div class="score-grid">${dimensionCards}</div></div>
@@ -4192,6 +4193,49 @@ function renderTopicEyeCoverageMatrix(matrix) {
   `;
 }
 
+function classifyOffTopicRedLine(report) {
+  const dims = report.scaffold?.dimensions || [];
+  const d = (id) => dims.find((item) => item.id === id)?.score ?? 100;
+  const checks = [
+    { type: '题眼漏答型', score: d('d1'), detail: '核心概念没有持续出现，文章容易从题目滑向泛谈。' },
+    { type: '单边表态型', score: d('d2'), detail: '只写一端合理性，缺少另一端、限制或转化条件。' },
+    { type: '现象停留型', score: d('d3'), detail: '例子或现象较多，但缺少“为什么会这样”的机制解释。' },
+    { type: '现实脱节型', score: d('d4'), detail: '判断没有落到校园、技术、社会或生活场景中。' },
+    { type: '边界缺失型', score: d('d5'), detail: '结论偏绝对，缺少前提、条件和例外。' },
+    { type: '结构平面型', score: d('d6'), detail: '段落推进缺少转折和递进信号，像平铺观点。' }
+  ];
+  return checks.sort((a, b) => a.score - b.score)[0] || checks[0];
+}
+
+function renderOffTopicRedLinePanel(report) {
+  const redLine = classifyOffTopicRedLine(report);
+  const weakRows = (report.coverageMatrix?.rows || []).filter((row) => row.score < 72);
+  const firstWeak = weakRows[0] || (report.coverageMatrix?.rows || [])[0];
+  const coreTerms = report.coverageMatrix?.summary?.coreTerms || report.topicPhrases || [];
+  const questionWords = report.coverageMatrix?.summary?.questionWords || [];
+  const mustAnswer = questionWords.length
+    ? `本题必须回应“${questionWords.slice(0, 2).join(' / ')}”这一设问。`
+    : '本题必须把核心概念转化成一个明确判断。';
+  return `
+    <div class="agent-result-block">
+      <h4>考场防跑题红线</h4>
+      <div class="score-grid">
+        <div class="flaw-row">
+          <div class="flaw-row-top"><span>红线类型</span><strong>${escapeHtml(redLine.type)}</strong></div>
+          <p>${escapeHtml(redLine.detail)}</p>
+          <p><strong>本次证据</strong>：${escapeHtml(firstWeak ? `第${firstWeak.index + 1}段 ${takeSentencePreview(firstWeak.evidenceSentence || '', 34) || '未识别到稳定扣题句'}` : '暂无段落')}</p>
+        </div>
+        <div class="flaw-row">
+          <div class="flaw-row-top"><span>题眼三问</span><strong>考前核验</strong></div>
+          <p>1. 我是否反复回应了：${escapeHtml((coreTerms || []).slice(0, 4).join('、') || '核心题眼')}？</p>
+          <p>2. ${escapeHtml(mustAnswer)}</p>
+          <p>3. 结尾是否写清“何时成立、何时失效、现实中怎么做”？</p>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 function renderOffTopicTeacherPriorityPanel(report) {
   const weakRow = (report.coverageMatrix?.rows || []).find((row) => row.score < 72)
     || (report.coverageMatrix?.rows || [])[0];
@@ -4238,6 +4282,46 @@ function renderParagraphAdviceRows(adviceList, reportType = 'offtopic') {
         <span class="flaw-target">请学生自己重写这一段，不替写。</span>
       </div>
     </div>`).join('');
+}
+
+function buildParagraphTeacherQuestion(row) {
+  const issues = row.issues || [];
+  if (issues.some((x) => /题眼|扣题|概念/.test(x))) return '这一段第一句是否能让阅卷老师看出你还在回答原题？';
+  if (issues.some((x) => /机制|分析|逻辑/.test(x))) return '这一段有没有解释“为什么这个例子能证明观点”？';
+  if (issues.some((x) => /现实|场景/.test(x))) return '这一段是否有一个具体生活或时代场景支撑判断？';
+  if (issues.some((x) => /边界|收束/.test(x))) return '这一段是否写清结论成立的前提和例外？';
+  return '这一段和上一段之间是否形成递进，而不是重复同一个意思？';
+}
+
+function buildParagraphSingleFix(row) {
+  const issues = row.issues || [];
+  if (issues.some((x) => /题眼|扣题|概念/.test(x))) return '只改段首句：补回题眼词和判断关系。';
+  if (issues.some((x) => /机制|分析|逻辑/.test(x))) return '只补一句机制解释：这个现象为什么能推出你的观点。';
+  if (issues.some((x) => /现实|场景/.test(x))) return '只补一个现实场景：校园、平台、技术或社会观察任选一个。';
+  if (issues.some((x) => /边界|收束/.test(x))) return '只补一句边界条件：在什么前提下成立，在哪些情况下要保留分寸。';
+  if (Number(row.score || 0) < 76) return '只做一件事：删掉重复表态，换成一处分析。';
+  return '本段先不大改，只压缩空话并保留清楚判断。';
+}
+
+function renderCritiqueParagraphCoachRows(report) {
+  const rows = report.paragraphRows || [];
+  if (!rows.length) return '<p>暂无逐段批注。</p>';
+  return rows.map((row) => {
+    const paragraph = splitParagraphs(report.draft)[row.index] || '';
+    const lead = takeSentencePreview((splitSentences(paragraph)[0] || ''), 28);
+    const role = row.role || inferParagraphRole(row.index, rows.length);
+    const level = Number(row.score || 0) >= 82 ? '本段可保留' : (Number(row.score || 0) >= 68 ? '本段可提档' : '本段先抢救');
+    return `
+      <div class="flaw-row">
+        <div class="flaw-row-top"><span>第${row.index + 1}段｜${escapeHtml(role)}</span><strong>${escapeHtml(level)} ${row.score}/100</strong></div>
+        <p><strong>本段职责</strong>：${escapeHtml(role === '开篇定向' ? '界定概念并亮出中心判断。' : (role === '结尾收束' ? '回扣题眼，补边界与价值收束。' : '展开论证，完成“观点-依据-分析-回扣”。'))}</p>
+        <p><strong>定位句</strong>：${escapeHtml(lead || '本段开头未成句')}</p>
+        <p><strong>证据句</strong>：${escapeHtml(takeSentencePreview(row.evidenceSentence || '', 54) || '未识别到稳定证据句')}</p>
+        <p><strong>老师追问</strong>：${escapeHtml(buildParagraphTeacherQuestion(row))}</p>
+        <p><strong>只改一处</strong>：${escapeHtml(buildParagraphSingleFix(row))}</p>
+      </div>
+    `;
+  }).join('');
 }
 
 function renderFlawScanRows(flawScan) {
@@ -4958,23 +5042,82 @@ function buildTeacherScoreEvidenceMap(report) {
   };
 }
 
+function getTeacherNextScoreBand(score70) {
+  const current = Number(score70 || 0);
+  const bands = [
+    { target: 42, label: '三类卷稳定线' },
+    { target: 49, label: '二类卷入口' },
+    { target: 56, label: '一类下入口' },
+    { target: 60, label: '一类中入口' },
+    { target: 63, label: '一类上冲刺线' },
+    { target: 66, label: '高分卷上限区' }
+  ];
+  return bands.find((band) => current < band.target) || { target: 70, label: '满分上限' };
+}
+
+function buildTeacherScoreGapPanel(report) {
+  const nextBand = getTeacherNextScoreBand(report.total70);
+  const gap = Math.max(0, nextBand.target - Number(report.total70 || 0));
+  const dimensionRows = [
+    { label: '材料核心立意', score: report.intent.score, max: report.intent.max, action: '先把题眼关系写成一句完整判断。' },
+    { label: '中心论点', score: report.thesis.score, max: report.thesis.max, action: '让中心论点出现在前两段，并在主体段反复回扣。' },
+    { label: '论证逻辑', score: report.argument.score, max: report.argument.max, action: '每个材料后补一句机制解释。' },
+    { label: '论据新旧', score: report.material.score, max: report.material.max, action: '补一个贴近当下的现实场景。' },
+    { label: '语言表达', score: report.language.score, max: report.language.max, action: '删口号句，把长句压成判断句。' },
+    { label: '结构章法', score: report.structure.score, max: report.structure.max, action: '检查是否完成“界定-展开-边界-收束”。' }
+  ];
+  const weakest = dimensionRows
+    .map((item) => ({ ...item, ratio: Number(item.score || 0) / Math.max(Number(item.max || 1), 1) }))
+    .sort((a, b) => a.ratio - b.ratio)
+    .slice(0, 2);
+  const weakRows = weakest.map((item, index) => `
+    <div class="flaw-row">
+      <div class="flaw-row-top"><span>${index + 1}. ${escapeHtml(item.label)}</span><strong>${item.score}/${item.max}</strong></div>
+      <p><strong>卡分原因</strong>：${escapeHtml(item.ratio >= 0.75 ? '本项基本稳，但还缺少一处能拉开差距的细节。' : '本项是当前最影响档次的部分。')}</p>
+      <p><strong>提档动作</strong>：${escapeHtml(item.action)}</p>
+    </div>
+  `).join('');
+  return `
+    <div class="agent-result-block">
+      <h4>离下一档还差什么</h4>
+      <p>当前 ${report.total70}/70，下一目标：${escapeHtml(nextBand.label)} ${nextBand.target}/70，还差 ${gap} 分。</p>
+      <div class="score-grid">${weakRows}</div>
+      <p class="agent-para-issues">先补最弱两项，不建议整篇推倒重写。</p>
+    </div>
+  `;
+}
+
+function buildDimensionUpgradeHint(label, score, max) {
+  const ratio = Number(score || 0) / Math.max(Number(max || 1), 1);
+  if (ratio >= 0.88) return '本项已接近高档，注意保持稳定，不要为了炫技破坏清晰度。';
+  if (ratio >= 0.72) return '本项能保住基本分，若要升档，需要增加一个可见的分析动作。';
+  if (label === '材料核心立意') return '先改审题：把题眼、设问和立场合成一句判断。';
+  if (label === '中心论点') return '先改中心句：不要只表态，要写清“在什么条件下成立”。';
+  if (label === '论证逻辑') return '先改例后分析：每个例子后追问“为什么能证明”。';
+  if (label === '论据新旧') return '先改素材：保留经典素材也可以，但要补当下语境。';
+  if (label === '语言表达') return '先改句子：删空话、压长句、保留判断句。';
+  if (label === '结构章法') return '先改段落顺序：界定、展开、转折、收束要能看出来。';
+  return '先补一个最容易看见的提档动作。';
+}
+
 function renderTeacherDimensionRows(report) {
   const evidenceMap = buildTeacherScoreEvidenceMap(report);
   const rows = [
-    ['材料核心立意', `${report.intent.score}/${report.intent.max}`, `判定：${report.intent.band}｜${report.intent.detail}`],
-    ['中心论点', `${report.thesis.score}/${report.thesis.max}`, report.thesis.detail],
-    ['论证逻辑', `${report.argument.score}/${report.argument.max}`, report.argument.detail],
-    ['论据新旧', `${report.material.score}/${report.material.max}`, report.material.detail],
-    ['语言表达', `${report.language.score}/${report.language.max}`, report.language.detail],
-    ['结构章法', `${report.structure.score}/${report.structure.max}`, report.structure.detail],
-    ['书写规范（OCR）', `${report.handwriting.score}/${report.handwriting.max}`, report.handwriting.detail]
+    { label: '材料核心立意', score: report.intent.score, max: report.intent.max, detail: `判定：${report.intent.band}｜${report.intent.detail}` },
+    { label: '中心论点', score: report.thesis.score, max: report.thesis.max, detail: report.thesis.detail },
+    { label: '论证逻辑', score: report.argument.score, max: report.argument.max, detail: report.argument.detail },
+    { label: '论据新旧', score: report.material.score, max: report.material.max, detail: report.material.detail },
+    { label: '语言表达', score: report.language.score, max: report.language.max, detail: report.language.detail },
+    { label: '结构章法', score: report.structure.score, max: report.structure.max, detail: report.structure.detail },
+    { label: '书写规范（OCR）', score: report.handwriting.score, max: report.handwriting.max, detail: report.handwriting.detail }
   ];
   return rows.map((row) => `
     <div class="flaw-row">
-      <div class="flaw-row-top"><span>${escapeHtml(row[0])}</span><strong>${escapeHtml(row[1])}</strong></div>
-      <p>${escapeHtml(row[2])}</p>
-      <p><strong>证据句</strong>：${escapeHtml(evidenceMap[row[0]]?.evidence || '暂无证据')}</p>
-      <p><strong>扣分/保分依据</strong>：${escapeHtml(evidenceMap[row[0]]?.task || '继续核对原文。')}</p>
+      <div class="flaw-row-top"><span>${escapeHtml(row.label)}</span><strong>${escapeHtml(`${row.score}/${row.max}`)}</strong></div>
+      <p>${escapeHtml(row.detail)}</p>
+      <p><strong>证据句</strong>：${escapeHtml(evidenceMap[row.label]?.evidence || '暂无证据')}</p>
+      <p><strong>扣分/保分依据</strong>：${escapeHtml(evidenceMap[row.label]?.task || '继续核对原文。')}</p>
+      <p><strong>升档提示</strong>：${escapeHtml(buildDimensionUpgradeHint(row.label, row.score, row.max))}</p>
     </div>
   `).join('');
 }
@@ -5092,6 +5235,7 @@ function renderTeacherScoreReport(report, container) {
       </div>
     </div>
     ${renderTeacherClosedLoopPanel(report, 'score')}
+    ${buildTeacherScoreGapPanel(report)}
     <div class="agent-result-block">
       <h4>分项得分</h4>
       <div class="score-grid">${renderTeacherDimensionRows(report)}</div>
@@ -5131,6 +5275,7 @@ function renderTeacherCritiqueReport(report, container) {
   const goodRows = renderSentenceQualityItems(sentenceQuality.goodItems || [], 'good');
   const badRows = renderSentenceQualityItems(sentenceQuality.badItems || [], 'bad');
   const errorBookPanel = renderErrorBookTrainingPanel(buildTeacherErrorBookSummary(report));
+  const paragraphCoachRows = renderCritiqueParagraphCoachRows(report);
   const paragraphRows = (report.paragraphRows || []).map((row) => {
     const lead = takeSentencePreview((splitSentences(splitParagraphs(report.draft)[row.index] || '')[0] || ''), 22);
     return `
@@ -5170,7 +5315,11 @@ function renderTeacherCritiqueReport(report, container) {
       <p>${escapeHtml(report.handwriting.detail)}</p>
     </div>
     <div class="agent-result-block">
-      <h4>逐段指出问题</h4>
+      <h4>逐段老师批注</h4>
+      ${paragraphCoachRows}
+    </div>
+    <div class="agent-result-block">
+      <h4>逐段问题明细</h4>
       ${paragraphRows || '<p>暂无逐段问题定位。</p>'}
     </div>
     <div class="agent-result-block">
