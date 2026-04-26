@@ -1648,6 +1648,7 @@ function renderAgentResult(analysis, container) {
   const classifyRows = (threePathKit.classify || []).map((x) => `<li>${escapeHtml(x)}</li>`).join('');
   const realityRows = (threePathKit.reality || []).map((x) => `<li>${escapeHtml(x)}</li>`).join('');
   const readyTpl = analysis.examReadyTemplates || { opening: '', turning: '', rising: '' };
+  const eightTrainingPanel = renderTeacherEightTrainingPanel(analysis);
   const openingTpl = (analysis.examTemplateSets?.openings || []).map((x, idx) =>
     `<li><span>${escapeHtml(x)}</span> <button class="agent-btn ghost template-use-btn" type="button" data-template-kind="opening" data-template-index="${idx}">用作开头</button></li>`
   ).join('');
@@ -1663,6 +1664,7 @@ function renderAgentResult(analysis, container) {
       <h3>题目分析：${escapeHtml(analysis.topic)}</h3>
       <div class="agent-tags">${tags}<span class="agent-tag">题型：${escapeHtml(analysis.topicType.name)}</span></div>
     </div>
+    ${eightTrainingPanel}
     ${exampleGuidedBlock}
     ${methodGuidedBlock}
     <div class="agent-result-block"><h4>出题人意图（筛选什么）</h4><ul>${intentRows}</ul></div>
@@ -4284,6 +4286,298 @@ function renderParagraphAdviceRows(adviceList, reportType = 'offtopic') {
     </div>`).join('');
 }
 
+function buildTopicRadar(analysis) {
+  const topic = analysis?.topic || '';
+  const type = analysis?.topicType?.code || detectTopicType(topic).code;
+  const core = (analysis?.topicPhrases || normalizeTopicPhrases(extractTopicPhrases(topic))).slice(0, 5);
+  const relation = type === 'relation'
+    ? `重点不是二选一，而是写清“${core[0] || '概念A'}—${core[1] || '概念B'}”如何互相制约、转化或统一。`
+    : (type === 'value'
+      ? `重点是判断“${core[0] || '该价值标准'}”的可靠性、代价和适用边界。`
+      : `重点是把问题拆成“前提—机制—结果”，避免只凭直觉表态。`);
+  const questionFocus = /是否|吗|必定|仅仅|意味着/.test(topic)
+    ? '设问重心：不能只回答“是/否”，必须说明在什么前提下成立、在什么情况下不成立。'
+    : (/认识|思考|怎么看|怎样/.test(topic)
+      ? '设问重心：不是讲道理，而是给出可检验的判断标准。'
+      : '设问重心：先界定题目任务，再完成论证。');
+  const driftRisks = dedupeArray([
+    ...(analysis?.pitfalls || []),
+    '把题目写成泛泛人生感悟，丢掉核心概念。',
+    '只写态度，不写成立条件和现实机制。'
+  ]).slice(0, 4);
+  return {
+    core,
+    relation,
+    questionFocus,
+    driftRisks,
+    hiddenPremise: analysis?.hiddenPremise || detectHiddenPremise(topic, analysis?.topicType || detectTopicType(topic), core)
+  };
+}
+
+function buildThesisHealthCheck(analysis, report = null) {
+  const sentence = report?.thesis?.thesisSentence || analysis?.thesis || '';
+  const topicPhrases = analysis?.topicPhrases || [];
+  const hasTopic = topicPhrases.some((term) => term && sentence.includes(term));
+  const hasStance = /(主张|认为|关键|应当|需要|可以|不能|取决于|不在于|而在于|并非|未必)/.test(sentence);
+  const hasCondition = /(前提|条件|边界|若|如果|当.*时|在.*下|并非|未必|不必|不能绝对)/.test(sentence);
+  const hasRelation = topicPhrases.length < 2
+    ? /(关系|机制|标准|价值|结果|代价|路径)/.test(sentence)
+    : (topicPhrases.slice(0, 2).every((term) => sentence.includes(term)) || /(关系|张力|制约|转化|统一|平衡|桥梁)/.test(sentence));
+  const hasBoundary = /(然而|但|不是.*而是|并不|未必|避免|限度|边界|不能简单)/.test(sentence);
+  const checks = [
+    { label: '有题眼', ok: hasTopic, fix: '中心句至少带回1个核心题眼。' },
+    { label: '有立场', ok: hasStance, fix: '不要只说“要理性看待”，要写清你的判断。' },
+    { label: '有条件', ok: hasCondition, fix: '补“在什么前提下成立”。' },
+    { label: '有关系', ok: hasRelation, fix: '写清概念之间的制约、转化或判断标准。' },
+    { label: '有边界', ok: hasBoundary, fix: '补一句“但并不意味着……”或“并非绝对”。' }
+  ];
+  const score = Math.round(checks.filter((x) => x.ok).length / checks.length * 100);
+  return {
+    sentence,
+    score,
+    checks,
+    verdict: score >= 80 ? '中心论点有一类卷雏形' : (score >= 60 ? '中心论点基本可用，但还不够稳' : '中心论点偏空，需要先重写判断句')
+  };
+}
+
+function buildLeadSentenceTrainingRows(analysis, report = null) {
+  const draft = report?.draft || '';
+  const paragraphs = splitParagraphs(draft);
+  if (!paragraphs.length) {
+    return [{
+      index: 0,
+      role: '草稿未输入',
+      lead: '输入作文后，这里会逐段检查段首句。',
+      duty: '段首句要承担“界定、推进、转折、升华”的功能。',
+      issue: '暂无草稿',
+      action: '先写4段，每段第一句都显式回扣题眼。'
+    }];
+  }
+  const topicPhrases = analysis?.topicPhrases || [];
+  return paragraphs.slice(0, 6).map((paragraph, index) => {
+    const role = inferParagraphRole(index, paragraphs.length);
+    const lead = ensureSentenceEnding(splitSentences(paragraph)[0] || '');
+    const hasTopic = topicPhrases.some((term) => term && lead.includes(term));
+    const hasLogic = /(然而|但|因此|进一步|换言之|由此|回到|诚然|首先|其次|最后)/.test(lead);
+    const duty = role === '开篇定向'
+      ? '界定核心概念并亮出中心判断。'
+      : (role === '结尾收束'
+        ? '回扣题眼，补边界和价值收束。'
+        : (role === '边界转折' ? '处理反面、例外和限制条件。' : '推进一层论证，不重复上一段。'));
+    const issue = hasTopic && hasLogic ? '段首句功能较清楚' : (!hasTopic ? '段首句未明显回扣题眼' : '段首句缺少推进信号');
+    const action = !hasTopic
+      ? '把题眼词放回段首句，并写成判断句。'
+      : (!hasLogic ? '补“然而/因此/进一步看”等推进词。' : '保留段首句，重点补段内分析。');
+    return { index, role, lead, duty, issue, action };
+  });
+}
+
+function buildMechanismCompletionRows(analysis, report = null) {
+  const draft = report?.draft || '';
+  const paragraphs = splitParagraphs(draft);
+  if (!paragraphs.length) {
+    return [{ label: '未输入草稿', evidence: '输入正文后，会检查每个例证后是否有机制解释。', action: '例证后必须补一句“这说明/其机制在于/由此可见”。' }];
+  }
+  const examplePattern = /(例如|比如|以.+?为例|案例|譬如|从.+?看|正如|孔子|鲁迅|司马迁|AI|人工智能|短视频|平台|航天|疫情|ChatGPT)/;
+  const mechanismPattern = /(这说明|由此可见|其机制在于|本质上|原因在于|意味着|所以|因此|从而|关键在于|证明了)/;
+  const rows = paragraphs.map((paragraph, index) => {
+    const hasExample = examplePattern.test(paragraph);
+    const hasMechanism = mechanismPattern.test(paragraph);
+    if (!hasExample) return null;
+    return {
+      label: `第${index + 1}段`,
+      evidence: takeSentencePreview(findEvidenceSentenceInParagraph(paragraph, [examplePattern]), 52),
+      action: hasMechanism ? '例证后已有解释，可继续压缩叙事。' : '例子后缺机制解释：补“这个例子为什么能证明观点”。',
+      weak: !hasMechanism
+    };
+  }).filter(Boolean);
+  return rows.length ? rows : [{ label: '例证不足', evidence: '全文未识别到稳定例证。', action: '至少补1个现实场景或材料，并紧跟机制解释。', weak: true }];
+}
+
+function buildBoundaryConditionRows(report = null) {
+  const draft = report?.draft || '';
+  const rows = splitParagraphs(draft).flatMap((paragraph, paragraphIndex) =>
+    splitSentences(paragraph)
+      .filter((sentence) => /(一定|必须|只有|完全|永远|绝对|必然|唯一|都|从来)/.test(sentence))
+      .map((sentence) => ({
+        paragraphIndex,
+        sentence: ensureSentenceEnding(sentence),
+        action: '把绝对判断改成条件判断：补“在……前提下 / 未必 / 需要警惕”。'
+      }))
+  ).slice(0, 4);
+  if (rows.length) return rows;
+  return [{ paragraphIndex: null, sentence: '暂未发现明显绝对化表达。', action: '结尾仍建议主动补一句边界条件，防止立意过满。' }];
+}
+
+function buildTierUpgradeMiniRows(analysis) {
+  const key = analysis?.topicPhrases?.[0] || '题眼';
+  const key2 = analysis?.topicPhrases?.[1] || '另一端';
+  return [
+    {
+      band: '48分常见写法',
+      thesis: `要正确看待${key}。`,
+      gap: '只表态，概念没有界定，也看不出条件和边界。'
+    },
+    {
+      band: '56分稳定写法',
+      thesis: `${key}有其合理性，但也需要看到局限。`,
+      gap: `已有转折，但“${key}${key2 !== key ? `—${key2}` : ''}”之间的机制还不清楚。`
+    },
+    {
+      band: '63+冲刺写法',
+      thesis: analysis?.thesis || `${key}应放入前提、机制与边界中作条件化判断。`,
+      gap: '能界定概念、解释机制、回应反方，并把结论落到现实选择。'
+    }
+  ];
+}
+
+function buildClassOneSentenceLibrary(analysis) {
+  const key = analysis?.topicPhrases?.[0] || '该命题';
+  const key2 = analysis?.topicPhrases?.[1] || '另一端';
+  return [
+    {
+      type: '概念界定句',
+      target: 1,
+      items: [
+        `所谓“${key}”，并不是一个可以直接套用的标签，而需要放回具体情境中辨析。`,
+        `讨论“${key}”之前，首先要区分它的表层表现与深层机制。`
+      ]
+    },
+    {
+      type: '转折推进句',
+      target: 2,
+      items: [
+        `诚然，${key}回应了现实中的某种需要；然而，若忽视其边界，判断便会滑向片面。`,
+        `进一步看，${key}${key2 !== key ? `与${key2}` : ''}并非互相取消，而是在具体条件中彼此校正。`
+      ]
+    },
+    {
+      type: '机制解释句',
+      target: 2,
+      items: [
+        `这一现象之所以能支撑上述判断，是因为它揭示了从外部条件到主体选择的转化机制。`,
+        `换言之，例子真正证明的不是表面结果，而是背后的价值排序与行动逻辑。`
+      ]
+    },
+    {
+      type: '边界收束句',
+      target: 3,
+      items: [
+        `因此，${key}并非绝对成立，它只有在明确前提、承认限制时才具有解释力。`,
+        `真正成熟的判断，不在于给出唯一答案，而在于能说明何时成立、何时需要保留分寸。`
+      ]
+    }
+  ];
+}
+
+function buildWeeklyClosureMini(report = null) {
+  const book = loadErrorBook();
+  const tags = report ? extractErrorTags({ draft: report.draft, score: teacherReportToScoreLike(report), offTopic: report.offTopic }) : [];
+  const top = Object.entries(book.tags || {})
+    .map(([tag, info]) => ({ tag, count: Number(info.count || 0), drill: buildErrorDrillFromTag(tag).drill }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 3);
+  return {
+    total: (book.records || []).length,
+    currentTags: tags,
+    top
+  };
+}
+
+function renderTeacherEightTrainingPanel(analysis, report = null) {
+  const radar = buildTopicRadar(analysis);
+  const thesis = buildThesisHealthCheck(analysis, report);
+  const leadRows = buildLeadSentenceTrainingRows(analysis, report);
+  const mechanismRows = buildMechanismCompletionRows(analysis, report);
+  const boundaryRows = buildBoundaryConditionRows(report);
+  const tierRows = buildTierUpgradeMiniRows(analysis);
+  const weekly = buildWeeklyClosureMini(report);
+  const sentenceLib = buildClassOneSentenceLibrary(analysis);
+
+  const radarPitfalls = (radar.driftRisks || []).map((x) => `<li>${escapeHtml(x)}</li>`).join('');
+  const thesisChecks = (thesis.checks || []).map((x) => `<li><strong>${escapeHtml(x.label)}</strong>：${x.ok ? '通过' : escapeHtml(x.fix)}</li>`).join('');
+  const leadHtml = leadRows.map((row) => `
+    <div class="flaw-row">
+      <div class="flaw-row-top"><span>${row.index != null ? `第${row.index + 1}段` : ''}${escapeHtml(row.role)}</span><strong>${escapeHtml(row.issue)}</strong></div>
+      <p><strong>段首句</strong>：${escapeHtml(row.lead)}</p>
+      <p><strong>本段职责</strong>：${escapeHtml(row.duty)}</p>
+      <p><strong>训练动作</strong>：${escapeHtml(row.action)}</p>
+    </div>
+  `).join('');
+  const mechanismHtml = mechanismRows.map((row) => `
+    <div class="flaw-row">
+      <div class="flaw-row-top"><span>${escapeHtml(row.label)}</span><strong>${row.weak ? '需补机制' : '基本通过'}</strong></div>
+      <p><strong>证据</strong>：${escapeHtml(row.evidence)}</p>
+      <p><strong>动作</strong>：${escapeHtml(row.action)}</p>
+    </div>
+  `).join('');
+  const boundaryHtml = boundaryRows.map((row) => `
+    <li>${row.paragraphIndex == null ? '' : `第${row.paragraphIndex + 1}段：`}${escapeHtml(takeSentencePreview(row.sentence, 54))}<br><span class="agent-para-issues">${escapeHtml(row.action)}</span></li>
+  `).join('');
+  const tierHtml = tierRows.map((row) => `
+    <div class="flaw-row">
+      <div class="flaw-row-top"><span>${escapeHtml(row.band)}</span></div>
+      <p><strong>中心论点</strong>：${escapeHtml(row.thesis)}</p>
+      <p><strong>分差原因</strong>：${escapeHtml(row.gap)}</p>
+    </div>
+  `).join('');
+  const weeklyHtml = (weekly.top || []).map((row, index) => `<li>${index + 1}. ${escapeHtml(row.tag)}（${row.count}次）：${escapeHtml(row.drill)}</li>`).join('');
+  const currentTagHtml = (weekly.currentTags || []).map((tag) => `<span class="agent-tag risk medium">${escapeHtml(tag)}</span>`).join('');
+  const sentenceHtml = sentenceLib.map((group) => `
+    <div class="flaw-row">
+      <div class="flaw-row-top"><span>${escapeHtml(group.type)}</span><strong>插入第${group.target}段</strong></div>
+      <ol>${group.items.map((sentence) => `<li>${escapeHtml(sentence)} <button class="agent-btn ghost triad-template-btn" type="button" data-template-sentence="${escapeHtml(sentence)}" data-target-paragraph="${group.target}">插入</button></li>`).join('')}</ol>
+    </div>
+  `).join('');
+
+  return `
+    <div class="agent-result-block">
+      <h4>上海阅卷八项训练面板</h4>
+      <p class="agent-para-issues">目标不是替孩子改作文，而是像老师一样指出：题怎么审、句怎么立、段怎么推进、分差在哪里。</p>
+      <details class="tier-essay-card" open>
+        <summary class="tier-essay-summary"><strong>1. 题目审题雷达</strong><span>核心概念 / 隐含关系 / 设问重心 / 易偏方向</span></summary>
+        <p><strong>核心概念</strong>：${escapeHtml((radar.core || []).join('、') || '未识别')}</p>
+        <p><strong>隐含关系</strong>：${escapeHtml(radar.relation)}</p>
+        <p><strong>设问重心</strong>：${escapeHtml(radar.questionFocus)}</p>
+        <p><strong>隐含前提</strong>：${escapeHtml(radar.hiddenPremise || '暂无')}</p>
+        <ul>${radarPitfalls}</ul>
+      </details>
+      <details class="tier-essay-card" open>
+        <summary class="tier-essay-summary"><strong>2. 中心论点体检</strong><span>有立场 / 有条件 / 有关系 / 有边界</span></summary>
+        <p><strong>检测句</strong>：${escapeHtml(thesis.sentence || '未形成中心判断句')}</p>
+        <p><strong>体检结果</strong>：${escapeHtml(thesis.verdict)}（${thesis.score}/100）</p>
+        <ul>${thesisChecks}</ul>
+      </details>
+      <details class="tier-essay-card">
+        <summary class="tier-essay-summary"><strong>3. 段首句训练器</strong><span>界定 / 推进 / 转折 / 升华</span></summary>
+        <div class="score-grid">${leadHtml}</div>
+      </details>
+      <details class="tier-essay-card">
+        <summary class="tier-essay-summary"><strong>4. 论证机制补全器</strong><span>例子后必须解释为什么</span></summary>
+        <div class="score-grid">${mechanismHtml}</div>
+      </details>
+      <details class="tier-essay-card">
+        <summary class="tier-essay-summary"><strong>5. 边界条件检查器</strong><span>防止绝对化、单边化</span></summary>
+        <ul>${boundaryHtml}</ul>
+      </details>
+      <details class="tier-essay-card">
+        <summary class="tier-essay-summary"><strong>6. 同题升档对照</strong><span>48 / 56 / 63+ 的分差</span></summary>
+        <div class="score-grid">${tierHtml}</div>
+      </details>
+      <details class="tier-essay-card">
+        <summary class="tier-essay-summary"><strong>7. 错因闭环周报</strong><span>累计错因与下次训练</span></summary>
+        <p>错因本累计：${weekly.total}次</p>
+        <div class="agent-tags">${currentTagHtml || '<span class="agent-tag">本次暂无明显新增错因</span>'}</div>
+        <ul>${weeklyHtml || '<li>暂未形成高频错因画像，完成几次评分后会更准。</li>'}</ul>
+      </details>
+      <details class="tier-essay-card">
+        <summary class="tier-essay-summary"><strong>8. 一类卷句式库</strong><span>按功能插入，不背空话</span></summary>
+        <div class="score-grid">${sentenceHtml}</div>
+      </details>
+    </div>
+  `;
+}
+
 function buildParagraphTeacherQuestion(row) {
   const issues = row.issues || [];
   if (issues.some((x) => /题眼|扣题|概念/.test(x))) return '这一段第一句是否能让阅卷老师看出你还在回答原题？';
@@ -5224,6 +5518,7 @@ function renderTeacherScoreReport(report, container) {
   const weakRows = renderSentenceQualityItems(sentenceQuality.badItems || [], 'bad');
   const suggestionRows = (report.suggestions || []).map((item) => `<li>${escapeHtml(item)}</li>`).join('');
   const errorBookPanel = renderErrorBookTrainingPanel(buildTeacherErrorBookSummary(report));
+  const eightTrainingPanel = renderTeacherEightTrainingPanel(report.analysis, report);
 
   container.innerHTML = `
     <div class="agent-result-head">
@@ -5235,6 +5530,7 @@ function renderTeacherScoreReport(report, container) {
       </div>
     </div>
     ${renderTeacherClosedLoopPanel(report, 'score')}
+    ${eightTrainingPanel}
     ${buildTeacherScoreGapPanel(report)}
     <div class="agent-result-block">
       <h4>分项得分</h4>
@@ -5276,6 +5572,7 @@ function renderTeacherCritiqueReport(report, container) {
   const badRows = renderSentenceQualityItems(sentenceQuality.badItems || [], 'bad');
   const errorBookPanel = renderErrorBookTrainingPanel(buildTeacherErrorBookSummary(report));
   const paragraphCoachRows = renderCritiqueParagraphCoachRows(report);
+  const eightTrainingPanel = renderTeacherEightTrainingPanel(report.analysis, report);
   const paragraphRows = (report.paragraphRows || []).map((row) => {
     const lead = takeSentencePreview((splitSentences(splitParagraphs(report.draft)[row.index] || '')[0] || ''), 22);
     return `
@@ -5301,6 +5598,7 @@ function renderTeacherCritiqueReport(report, container) {
       </div>
     </div>
     ${renderTeacherClosedLoopPanel(report, 'critique')}
+    ${eightTrainingPanel}
     <div class="agent-result-block">
       <h4>总评</h4>
       <p>${escapeHtml(report.comment80)}</p>
@@ -5871,6 +6169,18 @@ async function runRegressionSuite() {
     cases.push({ name: '分析题目主链', ok, detail: ok ? '可稳定产出审题结构' : '分析结果结构不完整' });
   } catch (err) {
     cases.push({ name: '分析题目主链', ok: false, detail: `异常：${err?.message || '未知错误'}` });
+  }
+
+  try {
+    const analysis = analyzeEssayTopic('生活中，人们常用认可度判别事物，区分高下。请写一篇文章，谈谈你对“认可度”的认识和思考。');
+    const panel = renderTeacherEightTrainingPanel(analysis);
+    const ok = /题目审题雷达/.test(panel)
+      && /中心论点体检/.test(panel)
+      && /论证机制补全器/.test(panel)
+      && /一类卷句式库/.test(panel);
+    cases.push({ name: '上海阅卷八项训练面板', ok, detail: ok ? '八项训练已接入分析与批改链路' : '八项训练面板缺失关键模块' });
+  } catch (err) {
+    cases.push({ name: '上海阅卷八项训练面板', ok: false, detail: `异常：${err?.message || '未知错误'}` });
   }
 
   try {
