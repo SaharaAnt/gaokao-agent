@@ -964,7 +964,7 @@ function initAgentWorkbench() {
   obDissectBtn?.addEventListener('click', () => {
     const essay = getObsidianTeachingEssayById(obEssaySelect?.value);
     if (!essay) return void renderObsidianTutorMessage(obTutorPanel, '请先选择一篇 OB 范文。');
-    renderObsidianEssayDissection(essay, obTutorPanel);
+    renderObsidianEssayDissection(essay, obTutorPanel, topicInput.value.trim());
   });
   obRecommendBtn?.addEventListener('click', () => {
     const topic = topicInput.value.trim();
@@ -975,12 +975,17 @@ function initAgentWorkbench() {
     renderObsidianActionBank(obActionTypeSelect?.value || 'all', obTutorPanel);
   });
   obTutorPanel?.addEventListener('click', (event) => {
-    const btn = event.target.closest('[data-ob-dissect-id]');
-    if (!btn) return;
-    const essay = getObsidianTeachingEssayById(btn.dataset.obDissectId);
-    if (essay) {
+    const dissectBtn = event.target.closest('[data-ob-dissect-id]');
+    const taskBtn = event.target.closest('[data-ob-task-id]');
+    if (!dissectBtn && !taskBtn) return;
+    const targetId = dissectBtn?.dataset.obDissectId || taskBtn?.dataset.obTaskId;
+    const essay = getObsidianTeachingEssayById(targetId);
+    if (essay && dissectBtn) {
       if (obEssaySelect) obEssaySelect.value = essay.id;
-      renderObsidianEssayDissection(essay, obTutorPanel);
+      renderObsidianEssayDissection(essay, obTutorPanel, topicInput.value.trim());
+    }
+    if (essay && taskBtn) {
+      renderObsidianComparisonTaskCard(essay, topicInput.value.trim(), obTutorPanel);
     }
   });
 
@@ -6094,6 +6099,7 @@ function renderObsidianTopicRecommendations(topic, panel) {
         <p><strong>看什么</strong>：${escapeHtml(row?.learnPoint || '看它如何完成段落功能。')}</p>
         <p><strong>证据句</strong>：${escapeHtml(row?.evidence || essay.thesis || '')}</p>
         <button class="agent-btn ghost" type="button" data-ob-dissect-id="${escapeHtml(essay.id)}">解剖这篇</button>
+        <button class="agent-btn ghost" type="button" data-ob-task-id="${escapeHtml(essay.id)}">生成对照任务卡</button>
       </div>
     `;
   }).join('');
@@ -6106,7 +6112,117 @@ function renderObsidianTopicRecommendations(topic, panel) {
   `;
 }
 
-function renderObsidianEssayDissection(essay, panel) {
+function renderObsidianParagraphPath(essay) {
+  const rows = Array.isArray(essay?.paragraphDissection) ? essay.paragraphDissection : [];
+  if (!rows.length) return '<p class="agent-empty">暂未拆出段落路径。</p>';
+  const visibleRows = rows.slice(0, 9);
+  return `
+    <div class="score-grid">
+      ${visibleRows.map((row) => {
+        const labels = (row.moveLabels || []).slice(0, 2).join('、') || '段落推进';
+        return `
+          <div class="flaw-row">
+            <div class="flaw-row-top">
+              <span>第${row.index}段</span>
+              <strong>${escapeHtml(row.role || '段落功能')}</strong>
+            </div>
+            <p><strong>承担动作</strong>：${escapeHtml(labels)}</p>
+            <p><strong>孩子要看</strong>：${escapeHtml(row.learnPoint || '看这一段如何推进中心论点。')}</p>
+          </div>
+        `;
+      }).join('')}
+    </div>
+  `;
+}
+
+function buildObsidianMoveTransferTip(typeKey) {
+  const tips = {
+    definition: '迁移到开头或首个主体段：先界定题眼，再限定讨论范围，避免一上来空喊态度。',
+    transition: '迁移到主体段中段：先承认一面合理性，再指出边界或另一面，让文章出现思辨转折。',
+    mechanism: '迁移到每个例证之后：补一句“为什么这个例子能证明观点”，把素材变成论证。',
+    boundary: '迁移到结尾或倒数第二段：把绝对结论改成条件结论，说明“何时成立、何处失效”。',
+    reality: '迁移到主体段后半部分：把抽象判断落到校园、技术平台、社会生活等具体场景。'
+  };
+  return tips[typeKey] || '迁移时只学段落功能，不照搬原句；先判断它在原文中承担什么作用，再改写到自己的题目里。';
+}
+
+function buildObsidianComparisonTask(essay, topic = '') {
+  const rows = Array.isArray(essay?.paragraphDissection) ? essay.paragraphDissection : [];
+  const topicLabel = topic || essay?.prompt || essay?.topicKey || '当前题目';
+  const usedRows = new Set();
+  const pickRow = (predicate, fallbackIndex = 0) => {
+    const row = rows.find((item) => !usedRows.has(item.index) && predicate(item))
+      || rows.find((item, index) => !usedRows.has(item.index) && index >= fallbackIndex)
+      || rows.find((item) => !usedRows.has(item.index))
+      || rows[fallbackIndex]
+      || rows[0]
+      || null;
+    if (row) usedRows.add(row.index);
+    return row;
+  };
+  const opening = pickRow((row) => /开篇|起/.test(row.role || '') || (row.moveKeys || []).includes('definition'), 0);
+  const mechanism = pickRow((row) => (row.moveKeys || []).includes('mechanism') || /机制|分析|证明/.test(row.learnPoint || ''), 1);
+  const transition = pickRow((row) => (row.moveKeys || []).includes('transition') || /转折|然而|诚然|边界/.test(`${row.lead || ''}${row.evidence || ''}${row.learnPoint || ''}`), 2);
+  const reality = pickRow((row) => (row.moveKeys || []).includes('reality') || /现实|时代|当下|社会|生活/.test(`${row.lead || ''}${row.evidence || ''}${row.learnPoint || ''}`), Math.max(rows.length - 2, 0));
+  const boundary = pickRow((row) => (row.moveKeys || []).includes('boundary') || /边界|并非|不是|不能|条件/.test(`${row.lead || ''}${row.evidence || ''}${row.learnPoint || ''}`), Math.max(rows.length - 1, 0));
+  const tasks = [
+    {
+      label: '看开头定向',
+      row: opening,
+      action: `用这篇第${opening?.index || 1}段对照自己的开头：是否说清“${topicLabel}”的核心概念、关系和判断边界。`
+    },
+    {
+      label: '看例后机制',
+      row: mechanism,
+      action: `看第${mechanism?.index || 2}段例证后有没有解释“为什么成立”。回到自己的作文，在一个例子后补一句机制分析。`
+    },
+    {
+      label: '看思辨转折',
+      row: transition,
+      action: `看第${transition?.index || 3}段如何从单向判断转入另一面。回到自己的作文，加一个“诚然/然而”式转折。`
+    },
+    {
+      label: '看现实落点',
+      row: reality,
+      action: `看第${reality?.index || rows.length || 4}段如何连接当下生活。回到自己的作文，补一个校园、技术或社会场景。`
+    },
+    {
+      label: '看边界收束',
+      row: boundary,
+      action: `看第${boundary?.index || rows.length || 5}段如何避免绝对化。回到自己的结尾，把“一定/必须/只有”改成条件判断。`
+    }
+  ].filter((item) => item.row);
+  return { essay, topic: topicLabel, tasks };
+}
+
+function renderObsidianComparisonTaskCard(essay, topic, panel) {
+  if (!panel) return;
+  if (!essay) return void renderObsidianTutorMessage(panel, '请先选择一篇 OB 范文。');
+  const card = buildObsidianComparisonTask(essay, topic);
+  const rows = card.tasks.map((task, index) => `
+    <div class="flaw-row">
+      <div class="flaw-row-top">
+        <span>${index + 1}. ${escapeHtml(task.label)}</span>
+        <strong>第${task.row?.index || '?'}段</strong>
+      </div>
+      <p><strong>原文证据</strong>：${escapeHtml(task.row?.evidence || task.row?.lead || '未提取')}</p>
+      <p><strong>学习动作</strong>：${escapeHtml(task.action)}</p>
+      <p><strong>迁移提醒</strong>：只迁移动作，不复制原句；改写后必须回扣自己的题目。</p>
+    </div>
+  `).join('');
+  panel.innerHTML = `
+    <div class="agent-result-block">
+      <h4>同题对照任务卡</h4>
+      <p><strong>当前题目</strong>：${escapeHtml(card.topic)}</p>
+      <p><strong>对照范文</strong>：${escapeHtml(essay.title || '未命名范文')}｜${escapeHtml(buildTeachingEssayMetaLine(essay))}</p>
+      <p class="agent-para-issues">这张卡不是让孩子抄范文，而是让他完成 5 个可检查的小动作：定向、机制、转折、现实、边界。</p>
+      <div class="score-grid">${rows || '<p>暂未生成任务。</p>'}</div>
+      <button class="agent-btn ghost" type="button" data-ob-dissect-id="${escapeHtml(essay.id)}">返回解剖这篇</button>
+    </div>
+  `;
+}
+
+function renderObsidianEssayDissection(essay, panel, topic = '') {
   if (!panel) return;
   const paragraphRows = (essay.paragraphDissection || []).map((row) => `
     <div class="flaw-row">
@@ -6130,6 +6246,12 @@ function renderObsidianEssayDissection(essay, panel) {
       <p><strong>可学习点</strong></p>
       <ul>${points || '<li>先看段落功能，再回到自己文章补缺。</li>'}</ul>
       <p><strong>Obsidian位置</strong>：${escapeHtml(essay.wikiPath ? `[[${essay.wikiPath}]]` : essay.notePath || '')}</p>
+      <button class="agent-btn ghost" type="button" data-ob-task-id="${escapeHtml(essay.id)}">${escapeHtml(topic ? '按当前题目生成对照任务卡' : '生成对照任务卡')}</button>
+    </div>
+    <div class="agent-result-block">
+      <h4>段落路径图</h4>
+      <p class="agent-para-issues">先看整篇文章怎样一步步推进，再看单段句子。上海卷真正拉分的地方，常在“段与段之间为什么这样走”。</p>
+      ${renderObsidianParagraphPath(essay)}
     </div>
     <div class="agent-result-block">
       <h4>逐段功能拆解</h4>
@@ -6158,6 +6280,7 @@ function renderObsidianActionBank(typeKey, panel) {
     return `
       <div class="agent-result-block">
         <h4>${escapeHtml(type.label)}</h4>
+        <p><strong>迁移方法</strong>：${escapeHtml(buildObsidianMoveTransferTip(type.key))}</p>
         <div class="score-grid">${rows || '<p>暂无样本。</p>'}</div>
       </div>
     `;
