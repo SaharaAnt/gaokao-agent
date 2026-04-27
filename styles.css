@@ -92,7 +92,7 @@ body {
 .knowledge-card.flipped .card-inner { transform: rotateY(180deg); }
 .card-front, .card-back { position: absolute; inset: 0; display: flex; flex-direction: column; backface-visibility: hidden; }
 .card-front { padding: 24px 26px 0; }
-.card-back { padding: 24px 26px 0; transform: rotateY(180deg); background: linear-gradient(180deg, #f0f7ff, #ebf5ff); }
+.card-back { padding: 24px 26px 0; transform: rotateY(180deg); background: linear-gradient(180deg, #f0f7ff, #ebf5ff); overflow-y: auto; }
 .card-header { display: flex; gap: 16px; align-items: flex-start; }
 .card-icon {
   width: 70px;
@@ -120,6 +120,11 @@ body {
 .freq-dot.active { background: #f59e0b; }
 .card-back-head { font-size: 22px; font-weight: 800; color: #ea580c; margin-bottom: 8px; }
 .card-back-list { margin: 0; padding-left: 24px; display: grid; gap: 8px; color: #334e7d; font-size: 15px; line-height: 1.6; }
+.card-ob-note { margin: 14px 0 0; color: #0f766e; font-size: 14px; font-weight: 700; }
+.card-method-bridge { margin-top: 12px; padding: 12px; border: 1px solid rgba(14, 165, 233, 0.24); border-radius: 16px; background: rgba(255, 255, 255, 0.72); color: #334e7d; }
+.card-method-bridge-title { margin-bottom: 6px; color: #0369a1; font-weight: 900; }
+.card-method-bridge p { margin: 4px 0; font-size: 13px; line-height: 1.55; }
+.card-method-steps { margin: 8px 0 0; padding-left: 18px; display: grid; gap: 5px; font-size: 13px; line-height: 1.48; }
 
 .agent-section { max-width: 1100px; margin: 0 auto; padding: 14px 20px 30px; }
 .agent-header { text-align: center; margin: 20px 0; }

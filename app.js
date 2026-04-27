@@ -824,6 +824,7 @@ function initCards() {
     const freq = Math.max(1, Math.min(5, Number(data.frequency || 3)));
     const backPointsRaw = Array.isArray(data.backPoints) ? data.backPoints : [];
     const backPoints = normalizeBackPoints(backPointsRaw);
+    const bridge = buildMethodCardObsidianBridge(data);
     card.innerHTML = `
       <div class="card-inner">
         <div class="card-front">
@@ -838,6 +839,7 @@ function initCards() {
           <div class="card-body">
             <p class="card-description">${escapeHtml(data.description || '')}</p>
             <div class="card-year-tags">${years.map((y) => `<span class="year-tag">${escapeHtml(y)}</span>`).join('')}</div>
+            ${bridge.matchCount ? `<p class="card-ob-note">OB高分范文支持：${bridge.matchCount}篇｜推荐看第${bridge.paragraphIndex || 1}段</p>` : ''}
           </div>
           <div class="card-foot">
             <span class="card-foot-left">出现频次 <em class="freq-dots">${renderFrequencyDots(freq)}</em></span>
@@ -847,6 +849,7 @@ function initCards() {
         <div class="card-back">
           <div class="card-back-head">${escapeHtml(data.backTitle || '考场提示')}</div>
           <ol class="card-back-list">${backPoints.map((p) => `<li>${escapeHtml(p)}</li>`).join('')}</ol>
+          ${renderMethodCardBridge(bridge)}
           <div class="card-foot">
             <span class="card-foot-left">再点一次可翻回</span>
             <span class="card-foot-right">翻回正面</span>
@@ -875,6 +878,205 @@ function normalizeBackPoints(points) {
     .slice(0, 3);
   while (normalized.length < 3) normalized.push(defaults[normalized.length]);
   return normalized;
+}
+
+function getMethodMoveKeys(card) {
+  const title = String(card?.title || '');
+  const category = String(card?.category || '');
+  if (/对立统一|必然|偶然/.test(title)) return ['transition', 'boundary'];
+  if (/量变|质变|因果/.test(title)) return ['mechanism'];
+  if (/现象|本质/.test(title)) return ['mechanism', 'definition'];
+  if (/价值|排序|条件/.test(title)) return ['boundary', 'definition'];
+  if (/个人|社会|伦理/.test(title) || category === 'ethics') return ['reality', 'boundary'];
+  if (/传承|创新/.test(title)) return ['definition', 'mechanism', 'reality'];
+  if (category === 'epistemology') return ['definition', 'mechanism'];
+  if (category === 'thinking') return ['mechanism', 'boundary'];
+  return ['definition', 'mechanism'];
+}
+
+function getMethodThemeHints(card) {
+  const title = String(card?.title || '');
+  const category = String(card?.category || '');
+  const hints = new Set();
+  if (/对立|必然|偶然|量变|质变/.test(title) || category === 'dialectics') {
+    hints.add('关系');
+    hints.add('辩证');
+  }
+  if (/现象|本质|因果|条件/.test(title) || category === 'epistemology' || category === 'thinking') {
+    hints.add('认知');
+    hints.add('判断');
+    hints.add('方法');
+  }
+  if (/价值|排序/.test(title) || category === 'axiology') {
+    hints.add('价值');
+    hints.add('意义');
+  }
+  if (/个人|社会|伦理/.test(title) || category === 'ethics') {
+    hints.add('责任');
+    hints.add('社会');
+  }
+  if (/传承|创新/.test(title)) {
+    hints.add('传承');
+    hints.add('创新');
+    hints.add('文化');
+  }
+  return Array.from(hints);
+}
+
+function getMethodActionSteps(card, row) {
+  const title = String(card?.title || '');
+  const evidence = row?.evidence || row?.lead || '';
+  const sampleTip = evidence ? `范文参照：先看它如何写“${summarizeSentence(evidence, 28)}”。` : '范文参照：先看对应段的段首句和例后分析。';
+  if (/对立统一/.test(title)) {
+    return ['第一句界定两端：A不是B的反面，而是与B互相校正。', '主体段写一端的合理性，再用“然而”写其边界。', sampleTip];
+  }
+  if (/必然|偶然/.test(title)) {
+    return ['把偶然写成触发因素，把必然写成长期趋势。', '用“意外发生后，人如何回应”替代宿命论。', sampleTip];
+  }
+  if (/量变|质变/.test(title)) {
+    return ['先写积累为什么还只是量变，再指出触发质变的阈值。', '例证后补一句：结构改变在哪里，价值新增在哪里。', sampleTip];
+  }
+  if (/现象|本质/.test(title)) {
+    return ['开头先承认现象，再追问“它为什么会出现”。', '主体段按“表层表现-深层机制-现实后果”推进。', sampleTip];
+  }
+  if (/价值|排序/.test(title)) {
+    return ['先给出排序标准：长期性、公平性、主体性或公共性。', '比较两种选择的代价，不要只说“都重要”。', sampleTip];
+  }
+  if (/个人|社会/.test(title)) {
+    return ['先写个人处境，再写这种选择对他人和社会的影响。', '避免道德喊话，落到制度、关系或行动责任。', sampleTip];
+  }
+  if (/因果/.test(title)) {
+    return ['每段都补齐“前提-机制-结果”，不让例子裸奔。', '例子后必须回答：它为什么能证明这一段观点。', sampleTip];
+  }
+  if (/条件/.test(title)) {
+    return ['把“一定/必须/只有”改成“在……条件下更可能”。', '主动写一条例外，说明观点的适用边界。', sampleTip];
+  }
+  if (/传承|创新/.test(title)) {
+    return ['先区分“简单拼接”和“重新生成”。', '写清旧资源如何形成新结构、新解释或新效用。', sampleTip];
+  }
+  return ['先把抽象概念改写成题目中的具体关系。', '主体段补机制解释，结尾补边界条件。', sampleTip];
+}
+
+function scoreEssayForMethodCard(essay, card) {
+  if (!essay || !card) return 0;
+  const haystack = [
+    essay.title,
+    essay.prompt,
+    essay.topicKey,
+    essay.topicType,
+    essay.themeTag,
+    essay.docRole,
+    essay.yearLabel,
+    ...(essay.highScoreMoves || []),
+    ...(essay.anchorTerms || []).slice(0, 12)
+  ].filter(Boolean).join(' ');
+  const years = Array.isArray(card.years) ? card.years.map((year) => String(year).replace(/\D/g, '')) : [];
+  let score = 0;
+  if (years.includes(String(essay.yearLabel || ''))) score += 30;
+  getMethodThemeHints(card).forEach((hint) => {
+    if (haystack.includes(hint)) score += 12;
+  });
+  getMethodMoveKeys(card).forEach((key) => {
+    const hit = (essay.paragraphDissection || []).some((row) => (row.moveKeys || []).includes(key));
+    if (hit) score += 10;
+  });
+  const titleTerms = String(card.title || '').split('').filter((ch) => /[\u4e00-\u9fa5]/.test(ch));
+  titleTerms.forEach((term) => {
+    if (haystack.includes(term)) score += 2;
+  });
+  if (essay.scoreBand?.isHighScore) score += 10;
+  return score;
+}
+
+function rankObsidianEssaysForMethodCard(card, limit = 6) {
+  const essays = getObsidianTeachingEssays();
+  if (!essays.length) return [];
+  return essays
+    .map((essay) => ({ ...essay, methodScore: scoreEssayForMethodCard(essay, card) }))
+    .filter((essay) => essay.methodScore > 0)
+    .sort((a, b) => b.methodScore - a.methodScore)
+    .slice(0, limit);
+}
+
+function pickMethodBridgeParagraph(essay, card) {
+  const rows = Array.isArray(essay?.paragraphDissection) ? essay.paragraphDissection : [];
+  if (!rows.length) return null;
+  const keys = getMethodMoveKeys(card);
+  return rows.find((row) => (row.moveKeys || []).some((key) => keys.includes(key)))
+    || rows.find((row) => /主体|分析|推进|转折|边界/.test(row.role || ''))
+    || rows[0];
+}
+
+function buildMethodCardObsidianBridge(card) {
+  const matches = rankObsidianEssaysForMethodCard(card, 3);
+  const essay = matches[0] || null;
+  const row = pickMethodBridgeParagraph(essay, card);
+  return {
+    matchCount: matches.length,
+    essay,
+    row,
+    paragraphIndex: row?.index || 1,
+    actions: getMethodActionSteps(card, row)
+  };
+}
+
+function renderMethodCardBridge(bridge) {
+  if (!bridge?.essay) {
+    return `
+      <div class="card-method-bridge">
+        <div class="card-method-bridge-title">范文迁移</div>
+        <p>暂未匹配到 OB 范文。先按上面的三条落地写法训练。</p>
+      </div>
+    `;
+  }
+  return `
+    <div class="card-method-bridge">
+      <div class="card-method-bridge-title">范文迁移</div>
+      <p><strong>看哪篇</strong>：${escapeHtml(summarizeSentence(bridge.essay.title || 'OB范文', 24))}</p>
+      <p><strong>看哪段</strong>：第${bridge.paragraphIndex || 1}段｜${escapeHtml(bridge.row?.role || '段落推进')}</p>
+      <ol class="card-method-steps">${(bridge.actions || []).map((step) => `<li>${escapeHtml(step)}</li>`).join('')}</ol>
+    </div>
+  `;
+}
+
+function rankMethodCardsForObsidianEssay(essay, limit = 3) {
+  if (typeof PHILOSOPHY_CARDS === 'undefined' || !Array.isArray(PHILOSOPHY_CARDS)) return [];
+  return PHILOSOPHY_CARDS
+    .map((card) => {
+      const row = pickMethodBridgeParagraph(essay, card);
+      return {
+        ...card,
+        row,
+        methodScore: scoreEssayForMethodCard(essay, card),
+        actions: getMethodActionSteps(card, row)
+      };
+    })
+    .filter((card) => card.methodScore > 0)
+    .sort((a, b) => b.methodScore - a.methodScore)
+    .slice(0, limit);
+}
+
+function renderObsidianEssayMethodCardBlock(essay) {
+  const cards = rankMethodCardsForObsidianEssay(essay, 3);
+  if (!cards.length) return '';
+  const rows = cards.map((card, index) => `
+    <div class="flaw-row">
+      <div class="flaw-row-top">
+        <span>${index + 1}. ${escapeHtml(card.title || '方法卡')}</span>
+        <strong>第${card.row?.index || 1}段</strong>
+      </div>
+      <p><strong>抽象概念</strong>：${escapeHtml(card.description || card.subtitle || '')}</p>
+      <p><strong>范文落点</strong>：${escapeHtml(card.row?.evidence || card.row?.lead || '看这一段如何承担论证功能。')}</p>
+      <p><strong>迁移动作</strong>：${escapeHtml((card.actions || [])[0] || '把概念转成题目中的具体关系。')}</p>
+    </div>
+  `).join('');
+  return `
+    <div class="agent-result-block">
+      <h4>关联方法卡片</h4>
+      <p class="agent-para-issues">这一步把范文里的高分动作翻译成可训练的方法卡：不是背哲学名词，而是学它在文章中怎么落地。</p>
+      <div class="score-grid">${rows}</div>
+    </div>
+  `;
 }
 
 function initCategoryNav() {
@@ -6248,6 +6450,7 @@ function renderObsidianEssayDissection(essay, panel, topic = '') {
       <p><strong>Obsidian位置</strong>：${escapeHtml(essay.wikiPath ? `[[${essay.wikiPath}]]` : essay.notePath || '')}</p>
       <button class="agent-btn ghost" type="button" data-ob-task-id="${escapeHtml(essay.id)}">${escapeHtml(topic ? '按当前题目生成对照任务卡' : '生成对照任务卡')}</button>
     </div>
+    ${renderObsidianEssayMethodCardBlock(essay)}
     <div class="agent-result-block">
       <h4>段落路径图</h4>
       <p class="agent-para-issues">先看整篇文章怎样一步步推进，再看单段句子。上海卷真正拉分的地方，常在“段与段之间为什么这样走”。</p>
