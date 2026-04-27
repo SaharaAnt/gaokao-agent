@@ -189,6 +189,7 @@ document.addEventListener('DOMContentLoaded', () => {
   safeInit(initCounterAnimation);
   safeInit(initCards);
   safeInit(initCategoryNav);
+  safeInit(initPageDirectoryLinks);
   safeInit(initAgentWorkbench);
   safeInit(initEvolutionOverview);
   safeInit(initTimeline);
@@ -1087,6 +1088,24 @@ function initCategoryNav() {
       btn.classList.add('active');
       const cat = btn.dataset.category || 'all';
       document.querySelectorAll('.knowledge-card').forEach((card) => card.classList.toggle('hidden', cat !== 'all' && card.dataset.category !== cat));
+    });
+  });
+}
+
+function initPageDirectoryLinks() {
+  document.querySelectorAll('.page-directory [data-open-details]').forEach((link) => {
+    link.addEventListener('click', (event) => {
+      const detailsId = link.dataset.openDetails;
+      const targetId = link.dataset.scrollTarget;
+      const details = detailsId ? document.getElementById(detailsId) : null;
+      const target = targetId ? document.getElementById(targetId) : null;
+      if (!details && !target) return;
+      event.preventDefault();
+      if (details && details.tagName === 'DETAILS') details.open = true;
+      const destination = target || details;
+      window.setTimeout(() => {
+        destination?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 80);
     });
   });
 }

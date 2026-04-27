@@ -512,7 +512,7 @@ body {
   margin: 16px auto 30px;
   padding: 0 24px;
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
 }
 .page-directory a {
