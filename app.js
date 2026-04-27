@@ -23,6 +23,90 @@ const HANDWRITING_SCAN_STATE = {
   error: ''
 };
 
+const OB_SHANGHAI_SCORE_STANDARD = {
+  source: 'OB《上海高考作文评分标准》',
+  bands: {
+    class1: {
+      key: 'class1',
+      label: '一类卷（63-70分）',
+      min: 63,
+      max: 70,
+      baseline: 67,
+      rule: '准确理解材料，立意深刻，中心突出，内容充实，结构严谨，有文采，论证层次丰富。'
+    },
+    class2: {
+      key: 'class2',
+      label: '二类卷（52-62分）',
+      min: 52,
+      max: 62,
+      baseline: 57,
+      rule: '符合题意，中心明确，内容较充实，结构完整，语言通顺。'
+    },
+    class3: {
+      key: 'class3',
+      label: '三类卷（39-51分）',
+      min: 39,
+      max: 51,
+      baseline: 45,
+      rule: '基本符合题意，中心尚明确，内容尚充实，结构基本完整，语言基本通顺。'
+    },
+    class4: {
+      key: 'class4',
+      label: '四类卷（21-38分）',
+      min: 21,
+      max: 38,
+      baseline: 29,
+      rule: '偏离题意，立意或选材不当，中心不明确，内容单薄，结构不够完整，语言欠通顺。'
+    },
+    class5: {
+      key: 'class5',
+      label: '五类卷（20分以下）',
+      min: 0,
+      max: 20,
+      baseline: 14,
+      rule: '脱离题意、文理不通，或全文不足400字。'
+    }
+  },
+  secondClassLanes: {
+    upper: {
+      key: 'upper',
+      label: '二类上（59-62分）',
+      min: 59,
+      max: 62,
+      baseline: 60,
+      rule: '有灵气、有新意，但在思想内容、行文结构、语言表达等某一方面有不足。'
+    },
+    middle: {
+      key: 'middle',
+      label: '二类中（55-58分）',
+      min: 55,
+      max: 58,
+      baseline: 57,
+      rule: '基本符合总体标准；有独特思考但某一方面有缺陷，或新意不够但平稳充实。'
+    },
+    lower: {
+      key: 'lower',
+      label: '二类下（52-54分）',
+      min: 52,
+      max: 54,
+      baseline: 53,
+      rule: '符合题意，中心明确，但论证、结构或语言较平。'
+    }
+  },
+  penalties: {
+    noTitle: 2,
+    typoEvery: 3,
+    typoMax: 5,
+    under600Cap: 36,
+    under400Class5: true
+  },
+  notes: {
+    class1: '议论文进一类，通常要么思想深刻、结构严谨、语言较好，要么角度独特且整体完成度高。',
+    class2: '二类卷不是“好作文”，而是比较合格的过关作文。',
+    general: '先定档，再在档内给分；OB高分范文只用于校准，不直接替代阅卷标准。'
+  }
+};
+
 let handwritingOcrScriptPromise = null;
 
 const TIMELINE_SCORE_GUIDE = {
@@ -5453,11 +5537,12 @@ function buildParagraphIssueRowsForTeacher(topic, draft, offTopic, thesisCheck) 
   })).slice(0, 5);
 }
 
-function getTeacherScoreCalibrationFloor({ draft, offTopic, thesis, argument, language, structure }) {
+function getTeacherScoreCalibrationFloor({ draft, offTopic, thesis, argument, material, language, structure }) {
   const signals = offTopic?.expertSignals || assessExpertEssaySignals(offTopic?.topic || '', draft, {
     topicPhrases: offTopic?.topicPhrases || [],
     semanticBridgeScore: offTopic?.semanticBridgeScore || 0
   });
+  const rubric = buildShanghaiOfficialRubricSignals({ offTopic, thesis, argument, material, language, structure, wordCount: countWords(draft) });
   const bridge = Number(offTopic?.semanticBridgeScore || signals.bridge || 0);
   const benchmarkScore = Number(offTopic?.obsidianBenchmark?.score || 0);
   const profile = offTopic?.obsidianBenchmark?.highScoreProfile || null;
@@ -5467,19 +5552,16 @@ function getTeacherScoreCalibrationFloor({ draft, offTopic, thesis, argument, la
   const highScoreAnchor = (offTopic?.obsidianBenchmark?.matched || []).some((item) => item.scoreBand?.isHighScore || /高分|佳作|一类|下水/.test(String(`${item.docRole || ''}${item.sourceFile || ''}`)));
   const wordCount = countWords(draft);
   if (wordCount < 500) return 0;
-  const stableThesis = Number(thesis?.score || 0) >= 6;
-  const stableArgument = Number(argument?.score || 0) >= 7;
-  const stableStructure = Number(structure?.score || 0) >= 5;
-  const languageOk = Number(language?.score || 0) >= 6;
-  if (wordCount >= 700 && sourceHighScore && profileScore >= 74 && stableStructure && languageOk) {
-    return clamp(Number(sourceGrade?.score || 66) - 3, 63, 68);
+  const stableThesis = Number(thesis?.score || 0) >= 7;
+  const stableArgument = Number(argument?.score || 0) >= 8;
+  const stableStructure = Number(structure?.score || 0) >= 6;
+  const languageOk = Number(language?.score || 0) >= 7;
+  if (wordCount >= 760 && sourceHighScore && profileScore >= 84 && benchmarkScore >= 80 && highScoreAnchor && rubric.topicAccuracy >= 78 && rubric.thoughtDepth >= 76 && stableThesis && stableArgument && stableStructure && languageOk) {
+    return clamp(Number(sourceGrade?.score || 67) - 2, 63, 68);
   }
-  if (wordCount >= 760 && profileScore >= 86 && Number(profile?.moveScore || 0) >= 72 && stableStructure && languageOk) return 63;
-  if (wordCount >= 680 && profileScore >= 78 && Number(profile?.moveScore || 0) >= 62 && stableStructure && languageOk) return 58;
-  if (wordCount >= 700 && benchmarkScore >= 82 && highScoreAnchor && signals.score >= 78 && bridge >= 62 && stableStructure && languageOk) return 63;
-  if (wordCount >= 650 && benchmarkScore >= 74 && highScoreAnchor && signals.score >= 72 && bridge >= 55 && stableStructure) return 58;
-  if (signals.score >= 84 && bridge >= 72 && stableThesis && stableArgument && stableStructure && languageOk) return 58;
-  if (signals.score >= 76 && bridge >= 62 && stableArgument && stableStructure && languageOk) return 52;
+  if (wordCount >= 780 && profileScore >= 88 && Number(profile?.moveScore || 0) >= 76 && rubric.topicAccuracy >= 80 && rubric.innovation >= 82 && stableThesis && stableArgument && stableStructure && languageOk) return 63;
+  if (wordCount >= 680 && benchmarkScore >= 76 && highScoreAnchor && signals.score >= 76 && bridge >= 58 && rubric.topicAccuracy >= 66 && Number(thesis?.score || 0) >= 6 && Number(argument?.score || 0) >= 7 && Number(structure?.score || 0) >= 5 && Number(language?.score || 0) >= 6) return 58;
+  if (signals.score >= 78 && bridge >= 64 && rubric.qualityScore >= 66 && Number(thesis?.score || 0) >= 6 && Number(argument?.score || 0) >= 7 && Number(structure?.score || 0) >= 5 && Number(language?.score || 0) >= 6) return 55;
   if (signals.score >= 68 && bridge >= 52 && stableStructure) return 45;
   return 0;
 }
@@ -5539,7 +5621,12 @@ function estimateTypoAndPunctuationPenalty(draft) {
   const punctuationIssue = countMatches(draft, /(。。|，，|；；|！！|？？|、，|，。|,,|!!|\?\?)/g);
   const quoteMismatch = countMatches(draft, /“/g) !== countMatches(draft, /”/g) ? 1 : 0;
   const obviousTypos = countMatches(draft, /(的地得的|因该|再次|布冯在心底|错别字占位)/g);
-  return clamp(punctuationIssue + quoteMismatch + obviousTypos, 0, 3);
+  const typoPenalty = Math.min(
+    OB_SHANGHAI_SCORE_STANDARD.penalties.typoMax,
+    Math.floor(Math.max(0, obviousTypos) / OB_SHANGHAI_SCORE_STANDARD.penalties.typoEvery)
+  );
+  const punctuationPenalty = punctuationIssue >= 3 ? 1 : 0;
+  return clamp(typoPenalty + punctuationPenalty + quoteMismatch, 0, OB_SHANGHAI_SCORE_STANDARD.penalties.typoMax);
 }
 
 function getShanghaiOfficialBand(score) {
@@ -5549,6 +5636,120 @@ function getShanghaiOfficialBand(score) {
   if (n >= 39) return '三类卷（39-51分）';
   if (n >= 21) return '四类卷（21-38分）';
   return '五类卷（20分以下）';
+}
+
+function getShanghaiBandProfile(key = 'class3') {
+  return OB_SHANGHAI_SCORE_STANDARD.bands[key] || OB_SHANGHAI_SCORE_STANDARD.bands.class3;
+}
+
+function getShanghaiSecondClassLaneProfile(key = 'middle') {
+  return OB_SHANGHAI_SCORE_STANDARD.secondClassLanes[key] || OB_SHANGHAI_SCORE_STANDARD.secondClassLanes.middle;
+}
+
+function buildShanghaiOfficialRubricSignals({ offTopic, thesis, argument, material, language, structure, wordCount }) {
+  const riskScore = Number(offTopic?.riskScore || 0);
+  const bridge = Number(offTopic?.semanticBridgeScore || 0);
+  const expert = Number(offTopic?.expertSignals?.score || 0);
+  const selfAxis = Number(offTopic?.expertSignals?.selfAxisScore || 0);
+  const benchmark = offTopic?.obsidianBenchmark || null;
+  const profileScore = Number(benchmark?.highScoreProfile?.score || 0);
+  const moveScore = Number(benchmark?.highScoreProfile?.moveScore || 0);
+  const topicAccuracy = clamp(Math.round(riskScore * 0.44 + bridge * 0.34 + expert * 0.12 + (Number(thesis?.score || 0) / Math.max(Number(thesis?.max || 1), 1)) * 10), 0, 100);
+  const thesisStable = clamp(Math.round((Number(thesis?.score || 0) / Math.max(Number(thesis?.max || 1), 1)) * 100), 0, 100);
+  const logicStrength = clamp(Math.round((Number(argument?.score || 0) / Math.max(Number(argument?.max || 1), 1)) * 100), 0, 100);
+  const structureStable = clamp(Math.round((Number(structure?.score || 0) / Math.max(Number(structure?.max || 1), 1)) * 100), 0, 100);
+  const languageStable = clamp(Math.round((Number(language?.score || 0) / Math.max(Number(language?.max || 1), 1)) * 100), 0, 100);
+  const materialFit = clamp(Math.round((Number(material?.score || 0) / Math.max(Number(material?.max || 1), 1)) * 100), 0, 100);
+  const fullness = clamp(wordCount >= 860 ? 100 : Math.round((Math.max(0, wordCount) / 860) * 100), 0, 100);
+  const thoughtDepth = clamp(Math.round(logicStrength * 0.4 + bridge * 0.22 + expert * 0.18 + selfAxis * 0.2), 0, 100);
+  const innovation = clamp(Math.round(selfAxis * 0.5 + profileScore * 0.22 + moveScore * 0.18 + languageStable * 0.1), 0, 100);
+  const qualityScore = clamp(Math.round(
+    topicAccuracy * 0.26
+    + thoughtDepth * 0.18
+    + thesisStable * 0.12
+    + structureStable * 0.14
+    + languageStable * 0.14
+    + materialFit * 0.08
+    + fullness * 0.08
+  ), 0, 100);
+  return {
+    riskScore,
+    bridge,
+    expert,
+    selfAxis,
+    profileScore,
+    moveScore,
+    topicAccuracy,
+    thesisStable,
+    logicStrength,
+    structureStable,
+    languageStable,
+    materialFit,
+    fullness,
+    thoughtDepth,
+    innovation,
+    qualityScore
+  };
+}
+
+function determineShanghaiSecondClassLane(signals) {
+  if (signals.qualityScore >= 74 && (signals.innovation >= 72 || signals.thoughtDepth >= 70)) {
+    return getShanghaiSecondClassLaneProfile('upper');
+  }
+  if (signals.qualityScore >= 62) {
+    return getShanghaiSecondClassLaneProfile('middle');
+  }
+  return getShanghaiSecondClassLaneProfile('lower');
+}
+
+function scoreWithinShanghaiBand(assessment) {
+  const bandKey = assessment?.bandKey || assessment?.key || 'class3';
+  const signals = assessment?.signals || {};
+  const lane = assessment?.lane || null;
+  if (bandKey === 'class1') {
+    let score = getShanghaiBandProfile('class1').baseline;
+    if (signals.thoughtDepth >= 88) score += 1;
+    if (signals.innovation >= 86) score += 1;
+    if (signals.languageStable >= 82) score += 1;
+    if (signals.structureStable >= 88) score += 1;
+    if (signals.materialFit >= 80) score += 1;
+    if (signals.thesisStable < 80) score -= 1;
+    if (signals.languageStable < 76) score -= 1;
+    if (signals.structureStable < 82) score -= 1;
+    if (signals.fullness < 84) score -= 1;
+    return clamp(score, 63, 70);
+  }
+  if (bandKey === 'class2') {
+    const laneProfile = lane || getShanghaiSecondClassLaneProfile('middle');
+    let score = laneProfile.baseline;
+    if (signals.innovation >= 78) score += 1;
+    if (signals.thoughtDepth >= 74) score += 1;
+    if (signals.languageStable < 60) score -= 1;
+    if (signals.structureStable < 60) score -= 1;
+    if (signals.thesisStable < 58) score -= 1;
+    return clamp(score, laneProfile.min, laneProfile.max);
+  }
+  if (bandKey === 'class3') {
+    let score = getShanghaiBandProfile('class3').baseline;
+    if (signals.qualityScore >= 58) score += 3;
+    else if (signals.qualityScore >= 50) score += 1;
+    if (signals.languageStable < 40) score -= 2;
+    if (signals.structureStable < 40) score -= 2;
+    if (signals.topicAccuracy < 46) score -= 2;
+    return clamp(score, 39, 51);
+  }
+  if (bandKey === 'class4') {
+    let score = getShanghaiBandProfile('class4').baseline;
+    if (signals.topicAccuracy >= 34) score += 3;
+    if (signals.structureStable >= 42) score += 2;
+    if (signals.languageStable < 30) score -= 3;
+    if (signals.fullness < 55) score -= 2;
+    return clamp(score, 21, 38);
+  }
+  let score = getShanghaiBandProfile('class5').baseline;
+  if (signals.topicAccuracy < 20) score -= 3;
+  if (signals.fullness < 45) score -= 2;
+  return clamp(score, 0, 20);
 }
 
 function getHighScoreMoveCounts(draft) {
@@ -5669,65 +5870,68 @@ function buildHighScoreEssayProfile(topic, draft, analysis, offTopic, checks = {
 }
 
 function determineOfficialScoreBand({ offTopic, thesis, argument, language, structure, material, wordCount }) {
-  const riskScore = Number(offTopic?.riskScore || 0);
-  const bridge = Number(offTopic?.semanticBridgeScore || 0);
-  const expert = Number(offTopic?.expertSignals?.score || 0);
-  const selfAxis = Number(offTopic?.expertSignals?.selfAxisScore || 0);
+  const signals = buildShanghaiOfficialRubricSignals({ offTopic, thesis, argument, material, language, structure, wordCount });
   const openReflection = isOpenReflectionTopic(offTopic?.topic || '');
-  const intentBand = offTopic?.expertSignals?.score >= 84 && bridge >= 72 ? '一类' : getCoreIntentBand(offTopic).band;
-  const thesisOk = Number(thesis?.score || 0) >= 8;
-  const thesisBasic = Number(thesis?.score || 0) >= 6;
-  const argumentStrong = Number(argument?.score || 0) >= 9;
-  const argumentBasic = Number(argument?.score || 0) >= 6;
-  const structureStrong = Number(structure?.score || 0) >= 7;
-  const structureBasic = Number(structure?.score || 0) >= 5;
-  const languageStrong = Number(language?.score || 0) >= 8;
-  const languageBasic = Number(language?.score || 0) >= 6;
-  const materialOk = Number(material?.score || 0) >= 6;
-  const benchmark = offTopic?.obsidianBenchmark || null;
-  const benchmarkScore = Number(benchmark?.score || 0);
-  const highScoreProfile = benchmark?.highScoreProfile || null;
-  const profileScore = Number(highScoreProfile?.score || 0);
-  const sourceGrade = offTopic?.reviewInfo?.sourceGrade || null;
-  const sourceHighScore = Number(sourceGrade?.score || 0) >= 63 || /一类|上等/.test(String(sourceGrade?.label || ''));
-  const highScoreAnchor = (benchmark?.matched || []).some((entry) => entry.scoreBand?.isHighScore || /高分|佳作|一类|下水|师生同写/.test(String(`${entry.docRole || ''}${entry.sourceFile || ''}`)));
-
-  if (wordCount < 120) return { band: '五类卷（20分以下）', min: 0, max: 20, reason: '字数极少或只有标题，按五类卷处理。' };
-  if (riskScore < 35 && bridge < 35) return { band: '四类卷（21-38分）', min: 21, max: 38, reason: '偏离材料核心，先压入四类卷区间。' };
-  if (wordCount >= 700 && sourceHighScore && profileScore >= 72 && structureBasic && languageBasic) {
-    return { band: '一类卷（63-70分）', min: 63, max: 70, reason: '资料原评为高分且正文高分画像达标，先进入一类复核区间，再看档内质量。' };
+  if (wordCount < 120) {
+    const profile = getShanghaiBandProfile('class5');
+    return { ...profile, band: profile.label, reason: profile.rule, lane: null, signals };
   }
-  if (wordCount >= 760 && profileScore >= 84 && highScoreProfile?.topicCoverage >= 66 && highScoreProfile?.moveScore >= 68 && structureBasic && languageBasic) {
-    return { band: '一类卷（63-70分）', min: 63, max: 70, reason: '正文段落节奏、思辨动作与中心轴接近OB高分范文画像，允许进入一类复核。' };
+  if (OB_SHANGHAI_SCORE_STANDARD.penalties.under400Class5 && wordCount < 400) {
+    const profile = getShanghaiBandProfile('class5');
+    return { ...profile, band: profile.label, reason: '全文不足400字，按五类卷处理。', lane: null, signals };
   }
-  if (wordCount >= 680 && profileScore >= 74 && highScoreProfile?.moveScore >= 60 && structureBasic && languageBasic) {
-    return { band: '二类卷（52-62分）', min: 52, max: 62, reason: '正文已具备高分文的若干动作，但题眼覆盖或论证密度仍需档内核验。' };
+  const deepTrack = wordCount >= 760
+    && signals.topicAccuracy >= 80
+    && signals.thoughtDepth >= 84
+    && signals.structureStable >= 75
+    && signals.languageStable >= 60
+    && signals.thesisStable >= 55;
+  const innovationTrack = wordCount >= 760
+    && signals.topicAccuracy >= 80
+    && signals.innovation >= 84
+    && signals.structureStable >= 72
+    && signals.thoughtDepth >= 80
+    && signals.thesisStable >= 55
+    && (signals.languageStable >= 58 || openReflection);
+  if (deepTrack || innovationTrack) {
+    const profile = getShanghaiBandProfile('class1');
+    const reason = deepTrack
+      ? `${OB_SHANGHAI_SCORE_STANDARD.notes.class1} 当前更接近“思想深刻、结构严谨”的一类路径。`
+      : `${OB_SHANGHAI_SCORE_STANDARD.notes.class1} 当前更接近“角度独特、整体完成度高”的一类路径。`;
+    return { ...profile, band: profile.label, reason, lane: null, signals };
   }
-  if (wordCount >= 700 && benchmarkScore >= 82 && highScoreAnchor && expert >= 78 && bridge >= 62 && thesisBasic && structureBasic && languageBasic) {
-    return { band: '一类卷（63-70分）', min: 63, max: 70, reason: 'OB高分库命中同型一类标杆，且正文中心轴、语义关联和结构证据能支撑一类复核。' };
+  const class2Ready = wordCount >= 600
+    && signals.topicAccuracy >= 60
+    && signals.thesisStable >= 50
+    && signals.logicStrength >= 50
+    && signals.structureStable >= 50
+    && signals.languageStable >= 50;
+  if (class2Ready) {
+    const profile = getShanghaiBandProfile('class2');
+    const lane = determineShanghaiSecondClassLane(signals);
+    return {
+      ...profile,
+      band: profile.label,
+      reason: `${OB_SHANGHAI_SCORE_STANDARD.notes.class2} 当前更接近${lane.label}口径。`,
+      lane,
+      signals
+    };
   }
-  if (wordCount >= 650 && benchmarkScore >= 72 && highScoreAnchor && expert >= 70 && bridge >= 52 && structureBasic && languageBasic) {
-    return { band: '二类卷（52-62分）', min: 52, max: 62, reason: 'OB高分库命中同型标杆，正文具备较稳定中心轴，先进入二类以上复核区间。' };
+  const class3Ready = wordCount >= 450
+    && signals.topicAccuracy >= 42
+    && signals.thesisStable >= 35
+    && signals.structureStable >= 35
+    && signals.languageStable >= 38;
+  if (class3Ready) {
+    const profile = getShanghaiBandProfile('class3');
+    return { ...profile, band: profile.label, reason: profile.rule, lane: null, signals };
   }
-  if (openReflection && selfAxis >= 72 && expert >= 80 && thesisBasic && argumentBasic && structureBasic && languageBasic) {
-    return { band: '一类卷（63-70分）', min: 63, max: 70, reason: '开放材料题已形成自洽中心轴，论证能围绕自拟立意持续推进。' };
+  if (signals.topicAccuracy >= 24 || signals.structureStable >= 24 || signals.languageStable >= 24) {
+    const profile = getShanghaiBandProfile('class4');
+    return { ...profile, band: profile.label, reason: profile.rule, lane: null, signals };
   }
-  if (riskScore >= 78 && bridge >= 70 && expert >= 82 && thesisOk && argumentStrong && structureStrong && languageBasic) {
-    return { band: '一类卷（63-70分）', min: 63, max: 70, reason: '准确理解材料，立意与论证层次均达到一类卷条件。' };
-  }
-  if (openReflection && selfAxis >= 58 && expert >= 70 && thesisBasic && structureBasic && languageBasic) {
-    return { band: '二类卷（52-62分）', min: 52, max: 62, reason: '开放材料题能围绕自拟中心展开，但思辨层次或论证密度仍需核验。' };
-  }
-  if (riskScore >= 62 && bridge >= 55 && thesisBasic && argumentBasic && structureBasic && languageBasic) {
-    return { band: '二类卷（52-62分）', min: 52, max: 62, reason: '符合题意，中心明确，结构与语言基本稳定。' };
-  }
-  if (riskScore >= 42 && bridge >= 38 && structureBasic) {
-    return { band: '三类卷（39-51分）', min: 39, max: 51, reason: '基本符合题意，但立意、论证或语言仍有明显短板。' };
-  }
-  if (/(三类|二类|一类)/.test(intentBand) && materialOk && languageBasic && structureBasic) {
-    return { band: '三类卷（39-51分）', min: 39, max: 51, reason: '文章尚能围绕材料展开，但核心论证不够稳定。' };
-  }
-  return { band: '四类卷（21-38分）', min: 21, max: 38, reason: '内容空泛或扣题不稳定，按四类卷区间处理。' };
+  const profile = getShanghaiBandProfile('class5');
+  return { ...profile, band: profile.label, reason: profile.rule, lane: null, signals };
 }
 
 function buildObsidianScoreEngineDecision({ benchmark, sourceGrade, expert, bridge, wordCount, rawScore }) {
@@ -5748,28 +5952,28 @@ function buildObsidianScoreEngineDecision({ benchmark, sourceGrade, expert, brid
   if (profile) {
     evidence.push(`高分画像${profileScore}/100：${profile.strengths?.slice(0, 3).join('、') || profile.label}。`);
   }
-  if (benchmarkScore >= 82 && highScoreAnchor && wordCount >= 700 && expert >= 78 && bridge >= 62) {
-    effect = '强标杆复核：允许进入一类区间';
+  if (benchmarkScore >= 84 && highScoreAnchor && wordCount >= 760 && expert >= 82 && bridge >= 68) {
+    effect = '强标杆复核：仅在一类条件基本成立时保住一类入口';
     floor = 63;
-  } else if (profileScore >= 86 && Number(profile?.moveScore || 0) >= 72 && wordCount >= 760) {
-    effect = '高分画像复核：段落节奏与思辨动作接近一类卷';
+  } else if (profileScore >= 88 && Number(profile?.moveScore || 0) >= 76 && wordCount >= 780) {
+    effect = '高分画像复核：仅做一类入口保底，不直接抬分';
     floor = 63;
-  } else if (sourceGrade?.score >= 63 && profileScore >= 74 && wordCount >= 700) {
-    effect = '资料原评+高分画像双校准：防止误压低档';
-    floor = Math.max(floor, clamp(Number(sourceGrade.score || 66) - 3, 63, 68));
-  } else if (benchmarkScore >= 74 && highScoreAnchor && wordCount >= 650 && expert >= 72 && bridge >= 55) {
-    effect = '同型高分校准：设置二类上限复核下限';
+  } else if (sourceGrade?.score >= 63 && profileScore >= 82 && wordCount >= 760) {
+    effect = '资料原评+高分画像双校准：防止高分样本被误压太低';
+    floor = Math.max(floor, 61);
+  } else if (benchmarkScore >= 76 && highScoreAnchor && wordCount >= 650 && expert >= 74 && bridge >= 58) {
+    effect = '同型高分校准：允许进入二类上复核';
     floor = 58;
   } else if (profileScore >= 78 && Number(profile?.moveScore || 0) >= 62 && wordCount >= 680) {
-    effect = '高分画像轻校准：先进入二类上复核';
-    floor = 58;
+    effect = '高分画像轻校准：先保住合格二类';
+    floor = 55;
   } else if (benchmarkScore >= 66 && highScoreAnchor && wordCount >= 600 && expert >= 68) {
     effect = '轻度校准：防止误压低档';
     floor = 52;
   }
-  if (sourceGrade?.score >= 63 && benchmarkScore >= 64 && wordCount >= 650 && expert >= 68 && bridge >= 48) {
-    effect = '资料原评+OB双校准：按高分文复核';
-    floor = Math.max(floor, Number(sourceGrade.score || 0) - 4);
+  if (sourceGrade?.score >= 63 && benchmarkScore >= 70 && wordCount >= 700 && expert >= 72 && bridge >= 56) {
+    effect = '资料原评+OB双校准：保留人工复核参考';
+    floor = Math.max(floor, Math.min(62, Number(sourceGrade.score || 0) - 4));
   }
   return {
     benchmarkScore,
@@ -5788,6 +5992,7 @@ function computeShanghaiOfficialScore({ originalDraft, draft, offTopic, intent, 
   const wordCount = countWords(draft);
   const band = determineOfficialScoreBand({ offTopic, intent, thesis, argument, material, language, structure, wordCount });
   const sourceGrade = offTopic?.reviewInfo?.sourceGrade || parseSourceGradeMetadata(originalDraft);
+  const bandSignals = band.signals || buildShanghaiOfficialRubricSignals({ offTopic, thesis, argument, material, language, structure, wordCount });
   const ratios = [
     Number(intent?.score || 0) / Math.max(Number(intent?.max || 18), 1),
     Number(thesis?.score || 0) / Math.max(Number(thesis?.max || 10), 1),
@@ -5798,25 +6003,23 @@ function computeShanghaiOfficialScore({ originalDraft, draft, offTopic, intent, 
     Number(handwriting?.score || 0) / Math.max(Number(handwriting?.max || 4), 1)
   ];
   const avgRatio = ratios.reduce((sum, x) => sum + clamp(x, 0, 1), 0) / ratios.length;
-  const expert = Number(offTopic?.expertSignals?.score || 0);
-  const bridge = Number(offTopic?.semanticBridgeScore || 0);
-  const qualityRatio = clamp(avgRatio * 0.62 + (expert / 100) * 0.24 + (bridge / 100) * 0.14, 0, 1);
-  let rawScore = Math.round(band.min + (band.max - band.min) * qualityRatio);
+  const qualityRatio = clamp(avgRatio * 0.45 + (bandSignals.qualityScore / 100) * 0.55, 0, 1);
+  let rawScore = scoreWithinShanghaiBand(band);
   rawScore = Math.max(rawScore, Number(calibrationFloor || 0));
 
   const deductions = [];
   const adjustments = [];
   if (wordCount < 600) {
-    rawScore = Math.min(rawScore, 36);
-    deductions.push('字数不足600字，上限控制在36分以内。');
+    rawScore = Math.min(rawScore, OB_SHANGHAI_SCORE_STANDARD.penalties.under600Cap);
+    deductions.push(`字数不足600字，上限控制在${OB_SHANGHAI_SCORE_STANDARD.penalties.under600Cap}分以内。`);
   } else if (wordCount < 800) {
     const gapPenalty = Math.min(6, Math.ceil((800 - wordCount) / 60));
     rawScore -= gapPenalty;
     deductions.push(`未满800字，扣${gapPenalty}分。`);
   }
   if (detectMissingTitle(originalDraft, offTopic?.reviewInfo)) {
-    rawScore -= 2;
-    deductions.push('未识别到标题，扣2分。');
+    rawScore -= OB_SHANGHAI_SCORE_STANDARD.penalties.noTitle;
+    deductions.push(`未识别到标题，扣${OB_SHANGHAI_SCORE_STANDARD.penalties.noTitle}分。`);
   }
   const typoPenalty = estimateTypoAndPunctuationPenalty(draft);
   if (typoPenalty) {
@@ -5828,36 +6031,36 @@ function computeShanghaiOfficialScore({ originalDraft, draft, offTopic, intent, 
   const benchmarkDecision = buildObsidianScoreEngineDecision({
     benchmark,
     sourceGrade,
-    expert,
-    bridge,
+    expert: Number(offTopic?.expertSignals?.score || 0),
+    bridge: Number(offTopic?.semanticBridgeScore || 0),
     wordCount,
     rawScore
   });
-  if (benchmarkDecision.floor && rawScore < benchmarkDecision.floor) {
+  if (benchmarkDecision.floor && rawScore < benchmarkDecision.floor && benchmarkDecision.floor <= band.max) {
     rawScore = benchmarkDecision.floor;
     adjustments.push(`${benchmarkDecision.effect}，设置复核下限${benchmarkDecision.floor}分。`);
   }
   const benchmarkLift = wordCount >= 600
     && rawScore >= 45
-    && Number(benchmark?.score || 0) >= 68
-    && expert >= 72
-    ? clamp(Math.round((Number(benchmark.score || 0) - 60) / 8), 1, 5)
+    && Number(benchmark?.score || 0) >= 74
+    && Number(offTopic?.expertSignals?.score || 0) >= 76
+    ? clamp(Math.round((Number(benchmark.score || 0) - 68) / 10), 1, 2)
     : 0;
-  if (benchmarkLift) {
+  if (benchmarkLift && rawScore + benchmarkLift <= band.max) {
     rawScore += benchmarkLift;
     adjustments.push(`OB高分范文标杆命中，按高分特征补偿${benchmarkLift}分。`);
   }
   const profile = benchmark?.highScoreProfile || null;
   const profileScore = Number(profile?.score || 0);
   const sourceHighScore = Number(sourceGrade?.score || 0) >= 63 || /一类|上等/.test(String(sourceGrade?.label || ''));
-  if (sourceHighScore && wordCount >= 700 && profileScore >= 74) {
-    const sourceFloor = clamp(Number(sourceGrade?.score || 66) - 4, 60, 68);
-    if (rawScore < sourceFloor) {
+  if (sourceHighScore && wordCount >= 760 && profileScore >= 84 && band.max >= 63) {
+    const sourceFloor = clamp(Number(sourceGrade?.score || 67) - 3, 63, 68);
+    if (rawScore < sourceFloor && sourceFloor <= band.max) {
       rawScore = sourceFloor;
       adjustments.push(`资料原评与高分画像同时成立，独立分低于标杆过多，回调到${sourceFloor}分复核线。`);
     }
   }
-  if (!sourceGrade && wordCount >= 760 && profileScore >= 86 && Number(profile?.moveScore || 0) >= 72 && rawScore < 63) {
+  if (!sourceGrade && wordCount >= 780 && profileScore >= 88 && Number(profile?.moveScore || 0) >= 76 && band.max >= 63 && rawScore < 63) {
     rawScore = 63;
     adjustments.push('无资料原评但高分画像强，先给一类入口复核线63分。');
   }
@@ -5885,10 +6088,13 @@ function computeShanghaiOfficialScore({ originalDraft, draft, offTopic, intent, 
     band: getShanghaiOfficialBand(finalScore),
     initialBand: band.band,
     bandReason: band.reason,
+    bandBaseline: band.baseline,
+    bandLane: band.lane?.label || '',
+    standardSource: OB_SHANGHAI_SCORE_STANDARD.source,
     wordCount,
     deductions,
     adjustments,
-    qualityRatio: Math.round(qualityRatio * 100),
+    qualityRatio: Math.round(bandSignals.qualityScore),
     noTitle: detectMissingTitle(originalDraft, offTopic?.reviewInfo),
     typoPenalty,
     sourceGrade,
@@ -7311,6 +7517,7 @@ function renderTeacherScoreReport(report, container) {
     <div class="agent-result-block">
       <h4>上海分档赋分依据</h4>
       <p><strong>先定档</strong>：${escapeHtml(report.officialScore?.initialBand || report.intent.band)}｜${escapeHtml(report.officialScore?.bandReason || report.intent.detail)}</p>
+      <p><strong>评分尺</strong>：${escapeHtml(report.officialScore?.standardSource || OB_SHANGHAI_SCORE_STANDARD.source)}｜基准分：${escapeHtml(String(report.officialScore?.bandBaseline ?? '--'))}${report.officialScore?.bandLane ? `｜档位：${escapeHtml(report.officialScore.bandLane)}` : ''}</p>
       <p><strong>档内质量</strong>：${escapeHtml(String(report.officialScore?.qualityRatio ?? '--'))}/100｜字数：${escapeHtml(String(report.officialScore?.wordCount ?? countWords(report.draft)))}</p>
       <p><strong>资料原评</strong>：${escapeHtml(report.officialScore?.sourceGrade ? `${report.officialScore.sourceGrade.label} ${report.officialScore.sourceGrade.score}分` : '未检测到')}</p>
       <p><strong>扣分项</strong></p>
@@ -7394,6 +7601,7 @@ function renderTeacherCritiqueReport(report, container) {
     <div class="agent-result-block">
       <h4>上海分档赋分依据</h4>
       <p><strong>先定档</strong>：${escapeHtml(report.officialScore?.initialBand || report.intent.band)}｜${escapeHtml(report.officialScore?.bandReason || report.intent.detail)}</p>
+      <p><strong>评分尺</strong>：${escapeHtml(report.officialScore?.standardSource || OB_SHANGHAI_SCORE_STANDARD.source)}｜基准分：${escapeHtml(String(report.officialScore?.bandBaseline ?? '--'))}${report.officialScore?.bandLane ? `｜档位：${escapeHtml(report.officialScore.bandLane)}` : ''}</p>
       <p><strong>资料原评</strong>：${escapeHtml(report.officialScore?.sourceGrade ? `${report.officialScore.sourceGrade.label} ${report.officialScore.sourceGrade.score}分` : '未检测到')}</p>
       <p><strong>硬扣分</strong></p>
       <ul>${deductionRows || '<li>暂无标题、字数、错别字类硬扣分。</li>'}</ul>
