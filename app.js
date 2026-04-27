@@ -3725,6 +3725,7 @@ function runOffTopicCheck(topic, draft) {
   const topicPhrases = extractTopicPhrases(topic);
   const reviewInfo = getReviewDraftInfo(topic, draft);
   const reviewDraft = reviewInfo.draft;
+  const scoringDraft = [reviewInfo.titleHint, reviewDraft].filter(Boolean).join('\n\n');
   const paragraphs = splitParagraphs(reviewDraft);
   const lower = reviewDraft.toLowerCase();
   const matched = topicPhrases.filter((p) => lower.includes(p.toLowerCase()));
@@ -3756,8 +3757,8 @@ function runOffTopicCheck(topic, draft) {
       + (100 - baseRiskPoints) * 0.28
   );
   const precisionPenalty = Math.round((100 - precision.avgScore) * 0.18);
-  const semanticBridgeScore = buildTopicSemanticBridgeScore(topic, reviewDraft, topicPhrases);
-  const expertSignals = assessExpertEssaySignals(topic, reviewDraft, { topicType, topicPhrases, semanticBridgeScore });
+  const semanticBridgeScore = buildTopicSemanticBridgeScore(topic, scoringDraft, topicPhrases);
+  const expertSignals = assessExpertEssaySignals(topic, scoringDraft, { topicType, topicPhrases, semanticBridgeScore });
   let riskScore = clamp(qualityScore - precisionPenalty + Math.round(semanticBridgeScore * 0.12), 0, 100);
   if (expertSignals.score >= 72 && semanticBridgeScore >= 60) {
     riskScore = Math.max(riskScore, Math.min(82, Math.round(expertSignals.score * 0.62 + semanticBridgeScore * 0.28)));
@@ -4972,6 +4973,47 @@ function detectMissingTitle(originalDraft, reviewInfo = {}) {
   return true;
 }
 
+function parseSourceGradeMetadata(text) {
+  const raw = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!raw) return null;
+  const scoreMatch = raw.match(/([1-6]\d|70)\s*分/);
+  const levelMatch = raw.match(/(一类上|一类中|一类下|一类|二类|三类|四类|五类|上等|中上|中等|下等)/);
+  if (!scoreMatch && !levelMatch) return null;
+  let score = scoreMatch ? clamp(parseInt(scoreMatch[1], 10), 0, 70) : 0;
+  const label = levelMatch ? levelMatch[1] : getShanghaiOfficialBand(score);
+  if (!score) {
+    if (/一类上|上等/.test(label)) score = 66;
+    else if (/一类中|一类/.test(label)) score = 62;
+    else if (/一类下/.test(label)) score = 58;
+    else if (/二类|中上/.test(label)) score = 56;
+    else if (/三类|中等/.test(label)) score = 45;
+    else if (/四类/.test(label)) score = 30;
+    else score = 18;
+  }
+  return {
+    score,
+    label,
+    text: raw
+  };
+}
+
+function stripSourceGradeText(text) {
+  return String(text || '')
+    .replace(/[（(][^）)]*(?:一类上|一类中|一类下|一类|二类|三类|四类|五类|上等|中上|中等|下等|[1-6]\d\s*分|70\s*分)[^）)]*[）)]/g, '')
+    .replace(/(?:一类上|一类中|一类下|一类|二类|三类|四类|五类|上等|中上|中等|下等)\s*(?:[1-6]\d|70)?\s*分?/g, '')
+    .replace(/(?:[1-6]\d|70)\s*分/g, '')
+    .replace(/^(标题|题目)[:：]/, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function isLikelyAuthorHeading(text) {
+  const raw = String(text || '').trim();
+  if (!raw) return false;
+  return /(学校|中学|高中|班|姓名|作者|指导老师|高[一二三]|初[一二三]|同学|大学|实验学校)/.test(raw)
+    && !/(不是.*而是|关键|本质|价值|关系|因此|然而|所谓|可见)/.test(raw);
+}
+
 function estimateTypoAndPunctuationPenalty(draft) {
   const punctuationIssue = countMatches(draft, /(。。|，，|；；|！！|？？|、，|，。|,,|!!|\?\?)/g);
   const quoteMismatch = countMatches(draft, /“/g) !== countMatches(draft, /”/g) ? 1 : 0;
@@ -4992,6 +5034,8 @@ function determineOfficialScoreBand({ offTopic, thesis, argument, language, stru
   const riskScore = Number(offTopic?.riskScore || 0);
   const bridge = Number(offTopic?.semanticBridgeScore || 0);
   const expert = Number(offTopic?.expertSignals?.score || 0);
+  const selfAxis = Number(offTopic?.expertSignals?.selfAxisScore || 0);
+  const openReflection = isOpenReflectionTopic(offTopic?.topic || '');
   const intentBand = offTopic?.expertSignals?.score >= 84 && bridge >= 72 ? '一类' : getCoreIntentBand(offTopic).band;
   const thesisOk = Number(thesis?.score || 0) >= 8;
   const thesisBasic = Number(thesis?.score || 0) >= 6;
@@ -5005,8 +5049,14 @@ function determineOfficialScoreBand({ offTopic, thesis, argument, language, stru
 
   if (wordCount < 120) return { band: '五类卷（20分以下）', min: 0, max: 20, reason: '字数极少或只有标题，按五类卷处理。' };
   if (riskScore < 35 && bridge < 35) return { band: '四类卷（21-38分）', min: 21, max: 38, reason: '偏离材料核心，先压入四类卷区间。' };
+  if (openReflection && selfAxis >= 72 && expert >= 80 && thesisBasic && argumentBasic && structureBasic && languageBasic) {
+    return { band: '一类卷（63-70分）', min: 63, max: 70, reason: '开放材料题已形成自洽中心轴，论证能围绕自拟立意持续推进。' };
+  }
   if (riskScore >= 78 && bridge >= 70 && expert >= 82 && thesisOk && argumentStrong && structureStrong && languageBasic) {
     return { band: '一类卷（63-70分）', min: 63, max: 70, reason: '准确理解材料，立意与论证层次均达到一类卷条件。' };
+  }
+  if (openReflection && selfAxis >= 58 && expert >= 70 && thesisBasic && structureBasic && languageBasic) {
+    return { band: '二类卷（52-62分）', min: 52, max: 62, reason: '开放材料题能围绕自拟中心展开，但思辨层次或论证密度仍需核验。' };
   }
   if (riskScore >= 62 && bridge >= 55 && thesisBasic && argumentBasic && structureBasic && languageBasic) {
     return { band: '二类卷（52-62分）', min: 52, max: 62, reason: '符合题意，中心明确，结构与语言基本稳定。' };
@@ -5023,6 +5073,7 @@ function determineOfficialScoreBand({ offTopic, thesis, argument, language, stru
 function computeShanghaiOfficialScore({ originalDraft, draft, offTopic, intent, thesis, argument, material, language, structure, handwriting, calibrationFloor }) {
   const wordCount = countWords(draft);
   const band = determineOfficialScoreBand({ offTopic, intent, thesis, argument, material, language, structure, wordCount });
+  const sourceGrade = offTopic?.reviewInfo?.sourceGrade || parseSourceGradeMetadata(originalDraft);
   const ratios = [
     Number(intent?.score || 0) / Math.max(Number(intent?.max || 18), 1),
     Number(thesis?.score || 0) / Math.max(Number(thesis?.max || 10), 1),
@@ -5040,6 +5091,7 @@ function computeShanghaiOfficialScore({ originalDraft, draft, offTopic, intent, 
   rawScore = Math.max(rawScore, Number(calibrationFloor || 0));
 
   const deductions = [];
+  const adjustments = [];
   if (wordCount < 600) {
     rawScore = Math.min(rawScore, 36);
     deductions.push('字数不足600字，上限控制在36分以内。');
@@ -5058,17 +5110,46 @@ function computeShanghaiOfficialScore({ originalDraft, draft, offTopic, intent, 
     deductions.push(`疑似错别字/标点问题扣${typoPenalty}分。`);
   }
 
+  const benchmark = offTopic?.obsidianBenchmark || null;
+  const benchmarkLift = wordCount >= 600
+    && rawScore >= 45
+    && Number(benchmark?.score || 0) >= 68
+    && expert >= 72
+    ? clamp(Math.round((Number(benchmark.score || 0) - 60) / 8), 1, 5)
+    : 0;
+  if (benchmarkLift) {
+    rawScore += benchmarkLift;
+    adjustments.push(`OB高分范文标杆命中，按高分特征补偿${benchmarkLift}分。`);
+  }
+
   const finalScore = clamp(rawScore, 0, 70);
+  const sourceComparison = sourceGrade ? {
+    score: sourceGrade.score,
+    label: sourceGrade.label,
+    gap: Number(sourceGrade.score || 0) - finalScore,
+    status: Math.abs(Number(sourceGrade.score || 0) - finalScore) <= 5 ? '接近' : (Number(sourceGrade.score || 0) > finalScore ? '系统偏严' : '系统偏松')
+  } : null;
+  if (sourceComparison && Math.abs(sourceComparison.gap) >= 8) {
+    adjustments.push(`资料原评与系统独立分相差${Math.abs(sourceComparison.gap)}分，建议结合OB标杆人工复核。`);
+  }
+  if (sourceGrade && wordCount < 600) {
+    adjustments.push(`检测到资料原评“${sourceGrade.label}${sourceGrade.score ? ` ${sourceGrade.score}分` : ''}”，但当前正文不足600字，仍受字数上限约束。`);
+  }
   return {
     score: finalScore,
+    independentScore: finalScore,
     band: getShanghaiOfficialBand(finalScore),
     initialBand: band.band,
     bandReason: band.reason,
     wordCount,
     deductions,
+    adjustments,
     qualityRatio: Math.round(qualityRatio * 100),
     noTitle: detectMissingTitle(originalDraft, offTopic?.reviewInfo),
-    typoPenalty
+    typoPenalty,
+    sourceGrade,
+    sourceComparison,
+    obsidianBenchmark: benchmark
   };
 }
 
@@ -5114,6 +5195,7 @@ function buildTeacherRevisionSuggestions(report) {
 }
 
 let OBSIDIAN_ENTRY_INDEX_CACHE = null;
+let OBSIDIAN_SUPPORT_PROFILE_CACHE = null;
 const OBSIDIAN_INDEX_FETCH_TIMEOUT_MS = 1200;
 
 function getEmbeddedObsidianEntryIndex() {
@@ -5128,6 +5210,23 @@ function getEmbeddedObsidianEntryIndex() {
     return [];
   }
   return [];
+}
+
+function getEmbeddedObsidianSupportProfile() {
+  try {
+    if (OBSIDIAN_SUPPORT_PROFILE_CACHE) return OBSIDIAN_SUPPORT_PROFILE_CACHE;
+    if (typeof window !== 'undefined' && window.OBSIDIAN_SUPPORT_PROFILE) {
+      OBSIDIAN_SUPPORT_PROFILE_CACHE = window.OBSIDIAN_SUPPORT_PROFILE;
+      return OBSIDIAN_SUPPORT_PROFILE_CACHE;
+    }
+    if (typeof OBSIDIAN_SUPPORT_PROFILE !== 'undefined' && OBSIDIAN_SUPPORT_PROFILE) {
+      OBSIDIAN_SUPPORT_PROFILE_CACHE = OBSIDIAN_SUPPORT_PROFILE;
+      return OBSIDIAN_SUPPORT_PROFILE_CACHE;
+    }
+  } catch (_) {
+    return null;
+  }
+  return null;
 }
 
 async function loadObsidianEntryIndex() {
@@ -5229,11 +5328,17 @@ function scoreObsidianEntryForEssay(entry, topic, draft, analysis) {
     entry.topicKey,
     entry.topicType,
     entry.themeTag,
+    entry.docRole,
+    entry.folder,
+    entry.relativePath,
     entry.packTitle,
     entry.sourceFile,
     entry.typeNoteName,
     entry.themeNoteName,
-    entry.clusterNoteName
+    entry.clusterNoteName,
+    ...(entry.anchorTerms || []),
+    ...(entry.promptSamples || []),
+    ...(entry.trainingUses || [])
   ].filter(Boolean).join(' ');
   const haystack = normalizeObsidianMatchText(haystackRaw);
   const topicNorm = normalizeObsidianMatchText(topicText);
@@ -5259,6 +5364,11 @@ function scoreObsidianEntryForEssay(entry, topic, draft, analysis) {
   if (inferredTheme && entry.themeTag === inferredTheme) {
     score += 16;
     reasons.push(`同母题：${inferredTheme}`);
+  }
+
+  if (entry.scoreBand?.isHighScore && /(高分范文|佳作|下水|师生同写|高考同题)/.test(String(entry.docRole || entry.sourceFile || ''))) {
+    score += 8;
+    reasons.push('OB高分标杆');
   }
 
   phrases.slice(0, 10).forEach((phrase) => {
@@ -5301,7 +5411,7 @@ function buildObsidianVisibleItem(entry, index, weakFocus, report, matched, mode
   return {
     rank: index + 1,
     title: entry.title || entry.topicKey || '未命名范文档案',
-    meta: `${entry.sourceFile || mode}｜${entry.yearLabel || '年份未标'}｜${entry.topicType || '题型未标'}｜${entry.themeTag || '母题未标'}`,
+    meta: `${entry.docRole || entry.sourceFile || mode}｜${entry.yearLabel || '年份未标'}｜${entry.topicType || '题型未标'}｜${entry.themeTag || '母题未标'}`,
     why: `${mode}：${reasons}`,
     visibleAction: weakFocus.action,
     selfCheck: `看完后回到自己的第${weakParagraph}段，只检查“${weakFocus.key}”这一项：有没有题眼、有无机制解释、有无边界收束。`,
@@ -5405,6 +5515,89 @@ function renderVisibleObsidianSuggestionBlock(items) {
   `;
 }
 
+async function buildObsidianHighScoreBenchmark(topic, draft, analysis, offTopic) {
+  const index = await loadObsidianEntryIndex();
+  const supportProfile = getEmbeddedObsidianSupportProfile();
+  const signals = offTopic?.expertSignals || assessExpertEssaySignals(topic, draft, {
+    topicPhrases: analysis?.topicPhrases || offTopic?.topicPhrases || [],
+    semanticBridgeScore: offTopic?.semanticBridgeScore || 0
+  });
+  const bridge = Number(offTopic?.semanticBridgeScore || signals.bridge || 0);
+  const selfAxis = Number(signals.selfAxisScore || 0);
+  const scored = (index || [])
+    .map((entry) => {
+      const matched = scoreObsidianEntryForEssay(entry, topic, draft, analysis);
+      return { ...entry, matchScore: matched.score, matchReasons: matched.reasons || [] };
+    })
+    .filter((entry) => entry.matchScore > 0)
+    .sort((a, b) => b.matchScore - a.matchScore)
+    .slice(0, 5);
+  const topMatch = clamp(scored[0]?.matchScore || 0, 0, 100);
+  const topicTypeName = normalizeObsidianTopicTypeName(analysis?.topicType?.name || detectTopicType(topic).name);
+  const typeMatch = scored.some((entry) => normalizeObsidianTopicTypeName(entry.topicType) === topicTypeName);
+  const theme = inferObsidianThemeTag(topic, draft);
+  const themeMatch = scored.some((entry) => theme && entry.themeTag === theme);
+  const highScoreMatch = scored.some((entry) => entry.scoreBand?.isHighScore);
+  const score = clamp(
+    Math.round(topMatch * 0.38 + Number(signals.score || 0) * 0.28 + bridge * 0.18 + selfAxis * 0.16)
+      + (typeMatch ? 4 : 0)
+      + (themeMatch ? 3 : 0)
+      + (highScoreMatch ? 3 : 0),
+    0,
+    100
+  );
+  const traits = [];
+  if (Number(signals.score || 0) >= 78) traits.push('论证节奏接近高分范文');
+  if (bridge >= 68) traits.push('题意关联稳定');
+  if (selfAxis >= 65) traits.push('自拟中心轴贯穿明显');
+  if (typeMatch) traits.push('与OB高分库同题型');
+  if (themeMatch) traits.push('与OB高分库同母题');
+  if (highScoreMatch) traits.push('命中OB高分/下水标杆');
+  if (!traits.length) traits.push('暂未形成稳定高分特征');
+  return {
+    score,
+    indexSize: index.length,
+    supportProfile,
+    matched: scored.map((entry) => ({
+      title: entry.title || entry.topicKey || '未命名范文',
+      docRole: entry.docRole || '',
+      topicType: entry.topicType || '',
+      themeTag: entry.themeTag || '',
+      sourceFile: entry.sourceFile || '',
+      scoreBand: entry.scoreBand || null,
+      matchScore: entry.matchScore,
+      reasons: entry.matchReasons || []
+    })),
+    traits
+  };
+}
+
+function renderObsidianBenchmarkPanel(report) {
+  const benchmark = report.officialScore?.obsidianBenchmark || report.obsidianBenchmark;
+  const sourceComparison = report.officialScore?.sourceComparison;
+  const profile = benchmark?.supportProfile || getEmbeddedObsidianSupportProfile();
+  const profileLine = profile?.total
+    ? `OB库共${profile.total}篇，含${profile.highScoreCount || 0}篇高分/可作标杆档案；主要支撑：${Object.entries(profile.trainingUseCounts || {}).slice(0, 4).map(([k, v]) => `${k}${v}`).join('、')}`
+    : '';
+  const matchedRows = (benchmark?.matched || []).slice(0, 3).map((item) => `
+    <li>${escapeHtml(item.title)}｜${escapeHtml(item.docRole || item.sourceFile || 'OB档案')}｜${escapeHtml(item.topicType || '题型未标')}｜${escapeHtml(item.themeTag || '母题未标')}｜${item.scoreBand?.isHighScore ? '高分标杆｜' : ''}匹配${Math.round(item.matchScore || 0)}</li>
+  `).join('');
+  const traitRows = (benchmark?.traits || []).map((item) => `<li>${escapeHtml(item)}</li>`).join('');
+  return `
+    <div class="agent-result-block">
+      <h4>OB高分范文标杆校准</h4>
+      <p><strong>标杆命中</strong>：${benchmark?.indexSize ? `已加载${benchmark.indexSize}篇OB高分档案，匹配度 ${Math.round(benchmark.score || 0)}/100` : '未加载到OB索引，暂用规则评分'}</p>
+      ${profileLine ? `<p><strong>库画像</strong>：${escapeHtml(profileLine)}</p>` : ''}
+      <p><strong>高分特征</strong></p>
+      <ul>${traitRows || '<li>暂未形成稳定高分特征。</li>'}</ul>
+      <p><strong>相近范文</strong></p>
+      <ul>${matchedRows || '<li>暂无相近OB范文；可补同题档案后再测。</li>'}</ul>
+      <p><strong>原评对照</strong>：${sourceComparison ? `${escapeHtml(sourceComparison.label)} ${sourceComparison.score}分｜系统差距 ${sourceComparison.gap > 0 ? '+' : ''}${sourceComparison.gap}分｜${escapeHtml(sourceComparison.status)}` : '未检测到资料原评'}</p>
+      <p class="agent-para-issues">原评只做复核参照，不直接抬高系统分；系统主要学习OB高分范文的题型、母题、中心轴和论证节奏。</p>
+    </div>
+  `;
+}
+
 async function buildShanghaiTeacherReviewReport(topic, draft, options = {}) {
   const analysis = analyzeEssayTopic(topic);
   const offTopic = runOffTopicCheck(topic, draft);
@@ -5416,6 +5609,13 @@ async function buildShanghaiTeacherReviewReport(topic, draft, options = {}) {
   const language = assessLanguageExpression(topic, reviewDraft, analysis);
   const structure = assessStructureDraft(reviewDraft, analysis);
   const handwriting = options.precomputedHandwriting || await assessHandwritingByOCR(reviewDraft);
+  let obsidianBenchmark = null;
+  try {
+    obsidianBenchmark = await buildObsidianHighScoreBenchmark(topic, reviewDraft, analysis, offTopic);
+  } catch (_) {
+    obsidianBenchmark = { score: 0, indexSize: 0, matched: [], traits: ['OB标杆暂未加载，使用本地规则评分。'] };
+  }
+  offTopic.obsidianBenchmark = obsidianBenchmark;
   const calibratedFloor = getTeacherScoreCalibrationFloor({ draft: reviewDraft, offTopic, intent, thesis, argument, material, language, structure });
   const officialScore = computeShanghaiOfficialScore({
     originalDraft: draft,
@@ -5446,6 +5646,7 @@ async function buildShanghaiTeacherReviewReport(topic, draft, options = {}) {
     handwriting,
     paragraphRows,
     calibrationFloor: calibratedFloor,
+    obsidianBenchmark,
     officialScore,
     total70: officialScore.score
   };
@@ -5705,6 +5906,7 @@ function renderTeacherScoreReport(report, container) {
   const weakRows = renderSentenceQualityItems(sentenceQuality.badItems || [], 'bad');
   const suggestionRows = (report.suggestions || []).map((item) => `<li>${escapeHtml(item)}</li>`).join('');
   const deductionRows = (report.officialScore?.deductions || []).map((item) => `<li>${escapeHtml(item)}</li>`).join('');
+  const adjustmentRows = (report.officialScore?.adjustments || []).map((item) => `<li>${escapeHtml(item)}</li>`).join('');
   const errorBookPanel = renderErrorBookTrainingPanel(buildTeacherErrorBookSummary(report));
   const eightTrainingPanel = renderTeacherEightTrainingPanel(report.analysis, report);
 
@@ -5722,10 +5924,14 @@ function renderTeacherScoreReport(report, container) {
       <h4>上海分档赋分依据</h4>
       <p><strong>先定档</strong>：${escapeHtml(report.officialScore?.initialBand || report.intent.band)}｜${escapeHtml(report.officialScore?.bandReason || report.intent.detail)}</p>
       <p><strong>档内质量</strong>：${escapeHtml(String(report.officialScore?.qualityRatio ?? '--'))}/100｜字数：${escapeHtml(String(report.officialScore?.wordCount ?? countWords(report.draft)))}</p>
+      <p><strong>资料原评</strong>：${escapeHtml(report.officialScore?.sourceGrade ? `${report.officialScore.sourceGrade.label} ${report.officialScore.sourceGrade.score}分` : '未检测到')}</p>
       <p><strong>扣分项</strong></p>
       <ul>${deductionRows || '<li>暂无标题、字数、错别字类硬扣分。</li>'}</ul>
+      <p><strong>校准说明</strong></p>
+      <ul>${adjustmentRows || '<li>暂无额外校准说明。</li>'}</ul>
       <p class="agent-para-issues">评分按上海卷五档：一类63-70、二类52-62、三类39-51、四类21-38、五类20以下；先判档，再档内赋分。</p>
     </div>
+    ${renderObsidianBenchmarkPanel(report)}
     ${renderTeacherClosedLoopPanel(report, 'score')}
     ${eightTrainingPanel}
     ${buildTeacherScoreGapPanel(report)}
@@ -5768,6 +5974,7 @@ function renderTeacherCritiqueReport(report, container) {
   const goodRows = renderSentenceQualityItems(sentenceQuality.goodItems || [], 'good');
   const badRows = renderSentenceQualityItems(sentenceQuality.badItems || [], 'bad');
   const deductionRows = (report.officialScore?.deductions || []).map((item) => `<li>${escapeHtml(item)}</li>`).join('');
+  const adjustmentRows = (report.officialScore?.adjustments || []).map((item) => `<li>${escapeHtml(item)}</li>`).join('');
   const errorBookPanel = renderErrorBookTrainingPanel(buildTeacherErrorBookSummary(report));
   const paragraphCoachRows = renderCritiqueParagraphCoachRows(report);
   const eightTrainingPanel = renderTeacherEightTrainingPanel(report.analysis, report);
@@ -5798,9 +6005,13 @@ function renderTeacherCritiqueReport(report, container) {
     <div class="agent-result-block">
       <h4>上海分档赋分依据</h4>
       <p><strong>先定档</strong>：${escapeHtml(report.officialScore?.initialBand || report.intent.band)}｜${escapeHtml(report.officialScore?.bandReason || report.intent.detail)}</p>
+      <p><strong>资料原评</strong>：${escapeHtml(report.officialScore?.sourceGrade ? `${report.officialScore.sourceGrade.label} ${report.officialScore.sourceGrade.score}分` : '未检测到')}</p>
       <p><strong>硬扣分</strong></p>
       <ul>${deductionRows || '<li>暂无标题、字数、错别字类硬扣分。</li>'}</ul>
+      <p><strong>校准说明</strong></p>
+      <ul>${adjustmentRows || '<li>暂无额外校准说明。</li>'}</ul>
     </div>
+    ${renderObsidianBenchmarkPanel(report)}
     ${renderTeacherClosedLoopPanel(report, 'critique')}
     ${eightTrainingPanel}
     <div class="agent-result-block">
@@ -6441,6 +6652,37 @@ async function runRegressionSuite() {
     cases.push({ name: '标题误判校准', ok, detail: ok ? `标题已忽略，校准后 ${report.total70}/70` : `校准不足：${report.total70}/70，标题忽略${(report.offTopic.reviewInfo?.removedHeadings || []).length}项` });
   } catch (err) {
     cases.push({ name: '标题误判校准', ok: false, detail: `异常：${err?.message || '未知错误'}` });
+  }
+
+  try {
+    const topic = '这段话可以启发人们如何去认识事物。请写一篇文章，谈谈你的思考和感悟。';
+    const body = [
+      '旧并不是停滞的同义词，新也不是凭空冒出的口号。真正有生命力的更新，往往是在对旧有经验的理解、辨析和转化中完成的。若只把旧看成负担，便会失去文化与经验的根；若只把新看成装饰，又会让改变停在表面。所谓以旧维新，正在于在继承中辨认可再生的力量，在更新中保留生命延续的脉络。',
+      '',
+      '从个人成长看，一个人并不是靠否定过去来获得新生。旧经验中有惯性，也有积累；有束缚，也有方法。学习中的错题、阅读中的旧见、生活中的习惯，若只被一概抛弃，就难以形成真正的反思。它们只有经过重新解释，才会成为新的判断力。由此可见，维新不是断裂，而是对旧有材料的再组织。',
+      '',
+      '从社会文化看，许多更新也不是抛开传统另起炉灶。传统戏曲进入新的舞台空间，古典诗词借由新的媒介被重新理解，城市街区在保护旧貌的同时更新公共功能，这些现象说明，旧并非只能被保存，也可以被激活。关键在于更新是否尊重原有肌理，是否让旧的价值在新的现实中继续发挥解释力。',
+      '',
+      '这种关系在今天尤其值得讨论。技术更新很快，观念变化也快，人们容易把速度误认为进步，把新鲜误认为创造。可是没有旧经验的校正，新常常只是短暂的热闹；没有新问题的召唤，旧也可能变成僵硬的陈列。真正的生长，恰恰发生在二者彼此照亮的时候。',
+      '',
+      '由此可见，旧与新的关系并不是时间先后的关系，而是价值生成的关系。旧提供沉淀、尺度和记忆，新提供问题、方法和可能。一个社会若只有旧，便缺少面向未来的勇气；若只有新，又容易失去判断的根基。二者相互校正，才构成持续更新的生命形态。',
+      '',
+      '当然，强调以旧维新，并不意味着守旧。若把旧物、旧制、旧观念都神圣化，更新就会变成保守的外衣。真正成熟的态度，是区分旧中可承续者与应被淘汰者：前者需要被转译，后者必须被扬弃。只有这样，新才不是轻浮的替换，旧也不是沉重的包袱。',
+      '',
+      '对青年而言，这种判断同样重要。学习传统，不是为了背负过去，而是为了获得更宽的坐标；拥抱新知，也不是为了抛弃来处，而是为了让旧有经验在新的现实中继续发生作用。当一个人能够在旧中发现可更新的资源，在新中守住不被流行裹挟的尺度，他才真正拥有面向未来的主体性。',
+      '',
+      '回到题目，生生不息的生命力，正在于旧与新之间并非简单对立。旧为新提供根系，新使旧获得再生。面对快速变化的时代，我们需要的不是盲目逐新，也不是固守旧壳，而是在辨析、转化与创造中完成延续。以旧维新，方能生生不息。'
+    ].join('\n');
+    const draft = `以旧维新 生生不息（一类上 68分）\n\n曹杨二中 高三 石英娜\n\n${body}`;
+    const report = await buildShanghaiTeacherReviewReport(topic, draft);
+    const ok = report.total70 >= 66
+      && report.officialScore?.sourceGrade?.score === 68
+      && report.officialScore?.sourceComparison
+      && report.offTopic?.expertSignals?.selfAxisScore >= 70
+      && (report.offTopic.reviewInfo?.removedHeadings || []).length >= 2;
+    cases.push({ name: 'OB高分文独立复核', ok, detail: ok ? `识别原评${report.officialScore.sourceGrade.score}分，独立评分 ${report.total70}/70，自拟中心轴${report.offTopic.expertSignals.selfAxisScore}` : `复核不足：${report.total70}/70，原评 ${report.officialScore?.sourceGrade?.score || '未识别'}` });
+  } catch (err) {
+    cases.push({ name: 'OB高分文独立复核', ok: false, detail: `异常：${err?.message || '未知错误'}` });
   }
 
   try {
@@ -7677,15 +7919,22 @@ function getReviewDraftInfo(topic, draft) {
   const paragraphs = splitParagraphs(draft);
   const removedHeadings = [];
   let body = [...paragraphs];
+  let sourceGrade = null;
+  let titleHint = '';
   let guard = 0;
   while (body.length >= 2 && guard < 3) {
     const remaining = body.slice(1).join('\n\n');
     if (!isLikelyFrontMatterParagraph(body[0], remaining, topicPhrases)) break;
+    sourceGrade = sourceGrade || parseSourceGradeMetadata(body[0]);
+    const possibleTitle = stripSourceGradeText(body[0]);
+    if (!titleHint && possibleTitle && !isLikelyAuthorHeading(possibleTitle)) {
+      titleHint = possibleTitle;
+    }
     removedHeadings.push(body.shift());
     guard += 1;
   }
   const cleaned = body.join('\n\n').trim() || String(draft || '').trim();
-  return { draft: cleaned, removedHeadings };
+  return { draft: cleaned, removedHeadings, sourceGrade, titleHint };
 }
 
 function normalizeDraftForReview(topic, draft) {
@@ -7712,14 +7961,87 @@ function getTopicRelatedTerms(topic, topicPhrases = []) {
   ]).slice(0, 18);
 }
 
+function isOpenReflectionTopic(topic) {
+  const text = String(topic || '');
+  return /(启发.*认识事物|思考和感悟|自选角度|选取一个角度|根据以下材料|这段话|上述材料|材料.*思考|话题写一篇)/.test(text);
+}
+
+function escapeRegex(text) {
+  return String(text || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function extractTitleAxisTerms(title) {
+  const cleaned = stripSourceGradeText(title)
+    .replace(/[《》“”"‘’'，。！？、：；,.!?;:]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!cleaned || isLikelyAuthorHeading(cleaned)) return [];
+  const terms = [];
+  const chunks = cleaned.split(/\s+/).filter((x) => x && x.length >= 1 && x.length <= 12);
+  chunks.forEach((chunk) => {
+    if (!/^(一类|二类|三类|四类|五类|上等|中等|高考|作文)$/.test(chunk)) terms.push(chunk);
+  });
+  if (/旧/.test(cleaned)) terms.push('旧', '旧有');
+  if (/新/.test(cleaned)) terms.push('新', '更新', '维新');
+  if (/生生不息/.test(cleaned)) terms.push('生生不息', '生命力');
+  if (/破/.test(cleaned) && /立/.test(cleaned)) terms.push('破', '立', '破立');
+  if (/认/.test(cleaned) && /可/.test(cleaned)) terms.push('认可', '认可度');
+  if (/断舍离/.test(cleaned)) terms.push('断舍离', '取舍');
+  if (/专/.test(cleaned) && /传/.test(cleaned)) terms.push('专', '转', '传', '传播');
+  return normalizeTopicPhrases(dedupeArray(terms)).slice(0, 10);
+}
+
+function buildSelfThesisAxisProfile(draft, explicitTitle = '') {
+  const paragraphs = splitParagraphs(draft);
+  let title = stripSourceGradeText(explicitTitle);
+  let bodyParagraphs = paragraphs;
+  if (!title && paragraphs.length >= 2) {
+    const first = stripSourceGradeText(paragraphs[0]);
+    const compact = first.replace(/\s+/g, '');
+    if (compact.length <= 28 && splitSentences(first).length <= 1 && !/[，。！？；：,.!?;:]/.test(first) && !isLikelyAuthorHeading(first)) {
+      title = first;
+      bodyParagraphs = paragraphs.slice(1);
+    }
+  }
+  const terms = extractTitleAxisTerms(title);
+  const body = bodyParagraphs.join('\n\n');
+  if (!terms.length || !body) {
+    return { score: 0, title, terms: [], termHits: 0, paragraphCoverage: 0, titleEcho: 0 };
+  }
+  const termHits = terms.reduce((sum, term) => sum + countMatches(body, new RegExp(escapeRegex(term), 'g')), 0);
+  const coveredParagraphs = bodyParagraphs.filter((p) => terms.some((term) => p.includes(term))).length;
+  const paragraphCoverage = Math.round((coveredParagraphs / Math.max(bodyParagraphs.length, 1)) * 100);
+  const relationCount = countMatches(body, /(关系|不是.*而是|并非|然而|但是|同时|条件|边界|转化|生成|价值|本质|机制|尺度|主体|实践)/g);
+  const firstLastEcho = [
+    bodyParagraphs[0] || '',
+    bodyParagraphs[bodyParagraphs.length - 1] || ''
+  ].filter((p) => terms.some((term) => p.includes(term))).length;
+  const score = clamp(
+    Math.min(30, termHits * 4)
+      + Math.min(26, Math.round(paragraphCoverage * 0.26))
+      + Math.min(24, relationCount * 3)
+      + firstLastEcho * 10
+      + (bodyParagraphs.length >= 5 ? 10 : 0),
+    0,
+    100
+  );
+  return { score, title, terms, termHits, paragraphCoverage, titleEcho: firstLastEcho };
+}
+
+function buildSelfThesisAxisScore(draft, explicitTitle = '') {
+  return buildSelfThesisAxisProfile(draft, explicitTitle).score;
+}
+
 function buildTopicSemanticBridgeScore(topic, draft, topicPhrases = []) {
   const related = getTopicRelatedTerms(topic, topicPhrases);
   const text = String(draft || '');
-  if (!related.length) return 0;
+  const selfAxis = buildSelfThesisAxisScore(text);
+  if (!related.length) return selfAxis;
   const exactHits = (topicPhrases || []).filter((term) => term && term.length >= 2 && text.includes(term)).length;
   const relatedHits = related.filter((term) => term && text.includes(term)).length;
   const relationSignals = countMatches(text, /(关系|标准|价值|机制|本质|边界|条件|前提|转化|制约|实践|现实)/g);
-  return clamp(exactHits * 14 + relatedHits * 10 + Math.min(18, relationSignals * 3), 0, 100);
+  const base = clamp(exactHits * 14 + relatedHits * 10 + Math.min(18, relationSignals * 3), 0, 100);
+  return isOpenReflectionTopic(topic) ? Math.max(base, selfAxis) : Math.max(base, Math.round(selfAxis * 0.72));
 }
 
 function assessExpertEssaySignals(topic, draft, options = {}) {
@@ -7731,6 +8053,8 @@ function assessExpertEssaySignals(topic, draft, options = {}) {
   const realityCount = countMatches(draft, /(现实|社会|时代|生活|校园|平台|算法|技术|青年|公共|传播|消费|信息)/g);
   const abstractCount = countMatches(draft, /(价值|标准|机制|本质|关系|主体|结构|判断|实践|公共|意义|逻辑)/g);
   const thesisCue = countMatches(draft, /(关键在于|真正|不是.*而是|不在于.*而在于|取决于|应当|需要|可以|不能|并非|未必)/g);
+  const selfAxisProfile = buildSelfThesisAxisProfile(draft);
+  const selfAxisScore = selfAxisProfile.score;
   const bridge = Number(options.semanticBridgeScore ?? buildTopicSemanticBridgeScore(topic, draft, options.topicPhrases || []));
   const score = clamp(
     (wordCount >= 760 ? 15 : (wordCount >= 600 ? 9 : 0))
@@ -7741,11 +8065,12 @@ function assessExpertEssaySignals(topic, draft, options = {}) {
     + Math.min(12, realityCount * 3)
     + Math.min(13, abstractCount * 2)
     + Math.min(8, thesisCue * 3)
-    + Math.min(12, Math.round(bridge * 0.12)),
+    + Math.min(12, Math.round(bridge * 0.12))
+    + Math.min(10, Math.round(selfAxisScore * 0.1)),
     0,
     100
   );
-  return { score, wordCount, paragraphCount: paragraphs.length, logicCount, turnCount, boundaryCount, realityCount, abstractCount, thesisCue, bridge };
+  return { score, wordCount, paragraphCount: paragraphs.length, logicCount, turnCount, boundaryCount, realityCount, abstractCount, thesisCue, bridge, selfAxisScore, selfAxisProfile };
 }
 
 function splitSentences(text) {
