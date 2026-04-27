@@ -138,6 +138,28 @@
             <div id="exampleTrainingList" class="material-card-list"></div>
           </div>
         </div>
+
+        <div class="material-card-lab ob-tutor-lab" id="obTutorLab">
+          <div class="essay-library-title">Obsidian 范文助教</div>
+          <p class="material-card-tip">把范文拆成“题目、中心论点、段落功能、高分动作”，用于看懂范文，而不是照抄范文。</p>
+          <div class="agent-actions quiet-actions">
+            <select id="obEssaySelect" class="timeline-select" title="选择一篇OB范文"></select>
+            <button id="obDissectBtn" class="agent-btn ghost" type="button">解剖这篇</button>
+            <button id="obRecommendBtn" class="agent-btn primary" type="button">按当前题目推荐3篇</button>
+            <select id="obActionTypeSelect" class="timeline-select" title="高分动作类型">
+              <option value="all">高分动作：全部</option>
+              <option value="definition">概念界定句</option>
+              <option value="transition">转折推进句</option>
+              <option value="mechanism">机制解释句</option>
+              <option value="boundary">边界收束句</option>
+              <option value="reality">现实关联句</option>
+            </select>
+            <button id="obActionBankBtn" class="agent-btn ghost" type="button">查看高分动作库</button>
+          </div>
+          <div id="obTutorPanel" class="material-card-list">
+            <p class="agent-empty">选择一篇范文解剖，或输入题目后点击“推荐3篇”。</p>
+          </div>
+        </div>
       </details>
 
       <div id="agentResult" class="agent-result" aria-live="polite">
@@ -190,8 +212,9 @@
     <div class="timeline" id="timelineContainer"></div>
   </section>
 
-    <script src="data.js?v=70"></script>
+    <script src="data.js?v=71"></script>
     <script src="obsidian_index.js?v=2"></script>
-    <script src="app.js?v=70"></script>
+    <script src="obsidian_teaching_assets.js?v=1"></script>
+    <script src="app.js?v=71"></script>
 </body>
 </html>
