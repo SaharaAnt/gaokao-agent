@@ -1124,6 +1124,12 @@ function initAgentWorkbench() {
   const obActionTypeSelect = document.getElementById('obActionTypeSelect');
   const obActionBankBtn = document.getElementById('obActionBankBtn');
   const obTutorPanel = document.getElementById('obTutorPanel');
+  const obKnowledgeSearchInput = document.getElementById('obKnowledgeSearchInput');
+  const obKnowledgeFolderSelect = document.getElementById('obKnowledgeFolderSelect');
+  const obKnowledgeTypeSelect = document.getElementById('obKnowledgeTypeSelect');
+  const obKnowledgeSearchBtn = document.getElementById('obKnowledgeSearchBtn');
+  const obKnowledgeResetBtn = document.getElementById('obKnowledgeResetBtn');
+  const obKnowledgePanel = document.getElementById('obKnowledgePanel');
   const handwritingImageInput = document.getElementById('handwritingImageInput');
   const handwritingOcrFillBtn = document.getElementById('handwritingOcrFillBtn');
   const clearHandwritingImageBtn = document.getElementById('clearHandwritingImageBtn');
@@ -1145,6 +1151,17 @@ function initAgentWorkbench() {
   renderExampleTrainingList(exampleTrainingList);
   populateObsidianTutorSelect(obEssaySelect);
   renderObsidianTutorIntro(obTutorPanel);
+  initObsidianKnowledgeBrowser({
+    searchInput: obKnowledgeSearchInput,
+    folderSelect: obKnowledgeFolderSelect,
+    typeSelect: obKnowledgeTypeSelect,
+    searchBtn: obKnowledgeSearchBtn,
+    resetBtn: obKnowledgeResetBtn,
+    panel: obKnowledgePanel,
+    tutorPanel: obTutorPanel,
+    essaySelect: obEssaySelect,
+    topicInput
+  });
   renderHandwritingPreviewList();
   updateHandwritingUi('ready', HANDWRITING_SCAN_STATE.pages.length ? `已上传手写图片，评分时会自动OCR识别；若草稿框为空，会先自动回填正文（最多${HANDWRITING_MAX_FILES}张）。` : `未上传手写图片时，书写项暂按中档估计；最多支持上传${HANDWRITING_MAX_FILES}张。`);
   updateExamWordCountDisplay(draftInput, examWordCount);
@@ -5098,11 +5115,15 @@ function buildEmbeddedObsidianBenchmarkSync(topic, draft, analysis, offTopic) {
     topicPhrases: analysis?.topicPhrases || offTopic?.topicPhrases || [],
     semanticBridgeScore: offTopic?.semanticBridgeScore || 0
   });
-  const score = clamp(Math.round(signal.topMatch * 0.4 + Number(signals.score || 0) * 0.32 + Number(offTopic?.semanticBridgeScore || 0) * 0.18 + Math.min(10, signal.highScoreCount * 3)), 0, 100);
+  const highScoreProfile = buildHighScoreEssayProfile(topic, draft, analysis, offTopic);
+  const corpusScore = clamp(Math.round(signal.topMatch * 0.4 + Number(signals.score || 0) * 0.32 + Number(offTopic?.semanticBridgeScore || 0) * 0.18 + Math.min(10, signal.highScoreCount * 3)), 0, 100);
+  const score = clamp(Math.max(corpusScore, supportProfile?.highScoreCount ? Math.round(highScoreProfile.score * 0.88) : 0), 0, 100);
   return {
     score,
+    corpusScore,
     indexSize: index.length,
     supportProfile,
+    highScoreProfile,
     matched: matches.map((entry) => ({
       title: entry.title || entry.topicKey || '未命名范文',
       docRole: entry.docRole || '',
@@ -5114,6 +5135,7 @@ function buildEmbeddedObsidianBenchmarkSync(topic, draft, analysis, offTopic) {
       reasons: entry.matchReasons || []
     })),
     traits: [
+      `高分画像：${highScoreProfile.label}（${highScoreProfile.score}/100）`,
       signal.typeSupport ? `同题型OB标杆${signal.typeSupport}篇` : '',
       signal.themeSupport ? `同母题OB标杆${signal.themeSupport}篇` : '',
       signal.highScoreCount ? `命中高分档案${signal.highScoreCount}篇` : '',
@@ -5419,6 +5441,10 @@ function getTeacherScoreCalibrationFloor({ draft, offTopic, thesis, argument, la
   });
   const bridge = Number(offTopic?.semanticBridgeScore || signals.bridge || 0);
   const benchmarkScore = Number(offTopic?.obsidianBenchmark?.score || 0);
+  const profile = offTopic?.obsidianBenchmark?.highScoreProfile || null;
+  const profileScore = Number(profile?.score || 0);
+  const sourceGrade = offTopic?.reviewInfo?.sourceGrade || null;
+  const sourceHighScore = Number(sourceGrade?.score || 0) >= 63 || /一类|上等/.test(String(sourceGrade?.label || ''));
   const highScoreAnchor = (offTopic?.obsidianBenchmark?.matched || []).some((item) => item.scoreBand?.isHighScore || /高分|佳作|一类|下水/.test(String(`${item.docRole || ''}${item.sourceFile || ''}`)));
   const wordCount = countWords(draft);
   if (wordCount < 500) return 0;
@@ -5426,6 +5452,11 @@ function getTeacherScoreCalibrationFloor({ draft, offTopic, thesis, argument, la
   const stableArgument = Number(argument?.score || 0) >= 7;
   const stableStructure = Number(structure?.score || 0) >= 5;
   const languageOk = Number(language?.score || 0) >= 6;
+  if (wordCount >= 700 && sourceHighScore && profileScore >= 74 && stableStructure && languageOk) {
+    return clamp(Number(sourceGrade?.score || 66) - 3, 63, 68);
+  }
+  if (wordCount >= 760 && profileScore >= 86 && Number(profile?.moveScore || 0) >= 72 && stableStructure && languageOk) return 63;
+  if (wordCount >= 680 && profileScore >= 78 && Number(profile?.moveScore || 0) >= 62 && stableStructure && languageOk) return 58;
   if (wordCount >= 700 && benchmarkScore >= 82 && highScoreAnchor && signals.score >= 78 && bridge >= 62 && stableStructure && languageOk) return 63;
   if (wordCount >= 650 && benchmarkScore >= 74 && highScoreAnchor && signals.score >= 72 && bridge >= 55 && stableStructure) return 58;
   if (signals.score >= 84 && bridge >= 72 && stableThesis && stableArgument && stableStructure && languageOk) return 58;
@@ -5501,6 +5532,123 @@ function getShanghaiOfficialBand(score) {
   return '五类卷（20分以下）';
 }
 
+function getHighScoreMoveCounts(draft) {
+  const text = String(draft || '');
+  return {
+    definition: countMatches(text, /(所谓|不是.+而是|并非|不在于.+而在于|关键在于|本质上|这并不意味着|真正)/g),
+    transition: countMatches(text, /(诚然|然而|但|但是|不过|另一方面|与此同时|进一步看|反过来|当然)/g),
+    mechanism: countMatches(text, /(因为|所以|因此|由此|从而|意味着|机制|原因在于|这说明|可见|正因如此|取决于)/g),
+    boundary: countMatches(text, /(边界|前提|条件|并不|未必|不能|不是绝对|并非必然|在.+情况下|若|如果|只有当)/g),
+    reality: countMatches(text, /(现实|当下|时代|社会|校园|技术|平台|媒介|公共|青年|生活中|今天)/g)
+  };
+}
+
+function calculateParagraphRhythmScore(paragraphs, wordCount) {
+  const count = paragraphs.length;
+  const compactLengths = paragraphs.map((p) => p.replace(/\s+/g, '').length).filter(Boolean);
+  const avg = compactLengths.length ? compactLengths.reduce((sum, n) => sum + n, 0) / compactLengths.length : 0;
+  const longEnough = compactLengths.filter((n) => n >= 70).length;
+  const tooShort = compactLengths.filter((n) => n > 0 && n < 35).length;
+  let score = 36;
+  if (count >= 5 && count <= 9) score += 26;
+  else if (count >= 4 && count <= 11) score += 16;
+  if (wordCount >= 780 && wordCount <= 1150) score += 22;
+  else if (wordCount >= 650) score += 14;
+  if (avg >= 90 && avg <= 190) score += 12;
+  else if (avg >= 65 && avg <= 230) score += 7;
+  if (longEnough >= Math.min(4, count)) score += 8;
+  if (tooShort >= 3) score -= 12;
+  return clamp(Math.round(score), 0, 100);
+}
+
+function calculateTopicCoverageScore(topic, draft, analysis, offTopic) {
+  const paragraphs = splitParagraphs(draft);
+  const terms = normalizeTopicPhrases(dedupeArray([
+    ...(analysis?.topicPhrases || []),
+    ...extractTopicPhrases(topic),
+    ...(offTopic?.topicPhrases || [])
+  ])).filter((term) => term && term.length >= 2).slice(0, 8);
+  const termHits = terms.filter((term) => draft.includes(term)).length;
+  const paragraphHits = paragraphs.filter((paragraph) => terms.some((term) => paragraph.includes(term))).length;
+  const termRatio = terms.length ? termHits / terms.length : 0;
+  const paraRatio = paragraphs.length ? paragraphHits / paragraphs.length : 0;
+  const bridge = Number(offTopic?.semanticBridgeScore || 0);
+  const expert = Number(offTopic?.expertSignals?.score || 0);
+  return clamp(Math.round(termRatio * 36 + paraRatio * 28 + bridge * 0.22 + expert * 0.14), 0, 100);
+}
+
+function calculateHighScoreMoveScore(moveCounts) {
+  const definition = Math.min(18, Number(moveCounts.definition || 0) * 7);
+  const transition = Math.min(22, Number(moveCounts.transition || 0) * 6);
+  const mechanism = Math.min(26, Number(moveCounts.mechanism || 0) * 4);
+  const boundary = Math.min(18, Number(moveCounts.boundary || 0) * 5);
+  const reality = Math.min(16, Number(moveCounts.reality || 0) * 5);
+  return clamp(definition + transition + mechanism + boundary + reality, 0, 100);
+}
+
+function calculateLanguageDensityScore(draft) {
+  const sentences = splitSentences(draft);
+  const compactLength = String(draft || '').replace(/\s+/g, '').length;
+  const abstractHits = countMatches(draft, /(价值|机制|本质|关系|边界|前提|条件|主体|公共|现实|标准|判断|结构|秩序|责任|意义|尺度|转化|生成)/g);
+  const logicHits = countMatches(draft, /(因此|然而|由此|进一步|换言之|可见|正因如此|与此同时|并非|不是.+而是)/g);
+  const repeated = sentences.filter((sentence, index, arr) => sentence && arr.indexOf(sentence) !== index).length;
+  const overLong = sentences.filter((sentence) => sentence.replace(/\s+/g, '').length > 78).length;
+  const density = compactLength ? ((abstractHits + logicHits) / compactLength) * 1000 : 0;
+  let score = 45 + Math.min(28, density * 8) + Math.min(18, logicHits * 3);
+  if (repeated) score -= Math.min(18, repeated * 5);
+  if (overLong >= 3) score -= Math.min(14, overLong * 3);
+  return clamp(Math.round(score), 0, 100);
+}
+
+function buildHighScoreEssayProfile(topic, draft, analysis, offTopic, checks = {}) {
+  const paragraphs = splitParagraphs(draft).filter((p) => p.replace(/\s+/g, '').length >= 12);
+  const wordCount = countWords(draft);
+  const moveCounts = getHighScoreMoveCounts(draft);
+  const topicCoverage = calculateTopicCoverageScore(topic, draft, analysis, offTopic);
+  const moveScore = calculateHighScoreMoveScore(moveCounts);
+  const rhythmScore = calculateParagraphRhythmScore(paragraphs, wordCount);
+  const languageScore = calculateLanguageDensityScore(draft);
+  const thesisRatio = checks.thesis?.max ? Number(checks.thesis.score || 0) / Number(checks.thesis.max || 1) : 0;
+  const argumentRatio = checks.argument?.max ? Number(checks.argument.score || 0) / Number(checks.argument.max || 1) : 0;
+  const structureRatio = checks.structure?.max ? Number(checks.structure.score || 0) / Number(checks.structure.max || 1) : 0;
+  const selfAxis = Number(offTopic?.expertSignals?.selfAxisScore || 0);
+  const expert = Number(offTopic?.expertSignals?.score || 0);
+  const thesisAxisScore = clamp(Math.round(selfAxis * 0.42 + expert * 0.24 + thesisRatio * 20 + argumentRatio * 8 + structureRatio * 6), 0, 100);
+  const score = clamp(Math.round(
+    topicCoverage * 0.22 +
+    moveScore * 0.24 +
+    rhythmScore * 0.17 +
+    thesisAxisScore * 0.2 +
+    languageScore * 0.17
+  ), 0, 100);
+  const strengths = [];
+  if (topicCoverage >= 72) strengths.push('题眼覆盖稳定');
+  if (moveScore >= 70) strengths.push('思辨动作密集');
+  if (rhythmScore >= 72) strengths.push('段落节奏接近一类卷');
+  if (thesisAxisScore >= 72) strengths.push('中心轴较稳');
+  if (languageScore >= 72) strengths.push('语言有论证密度');
+  const gaps = [];
+  if (topicCoverage < 62) gaps.push('题眼回扣不足');
+  if (moveScore < 58) gaps.push('机制/转折/边界动作不足');
+  if (rhythmScore < 58) gaps.push('段落节奏不像完整考场文');
+  if (thesisAxisScore < 60) gaps.push('中心轴不够持续');
+  if (languageScore < 58) gaps.push('语言密度偏低或重复');
+  return {
+    score,
+    topicCoverage,
+    moveScore,
+    rhythmScore,
+    thesisAxisScore,
+    languageScore,
+    moveCounts,
+    wordCount,
+    paragraphCount: paragraphs.length,
+    strengths,
+    gaps,
+    label: score >= 84 ? '一类卷相似度高' : (score >= 74 ? '二类上/一类候选' : (score >= 62 ? '基本符合高分动作' : '高分画像不足'))
+  };
+}
+
 function determineOfficialScoreBand({ offTopic, thesis, argument, language, structure, material, wordCount }) {
   const riskScore = Number(offTopic?.riskScore || 0);
   const bridge = Number(offTopic?.semanticBridgeScore || 0);
@@ -5519,10 +5667,23 @@ function determineOfficialScoreBand({ offTopic, thesis, argument, language, stru
   const materialOk = Number(material?.score || 0) >= 6;
   const benchmark = offTopic?.obsidianBenchmark || null;
   const benchmarkScore = Number(benchmark?.score || 0);
+  const highScoreProfile = benchmark?.highScoreProfile || null;
+  const profileScore = Number(highScoreProfile?.score || 0);
+  const sourceGrade = offTopic?.reviewInfo?.sourceGrade || null;
+  const sourceHighScore = Number(sourceGrade?.score || 0) >= 63 || /一类|上等/.test(String(sourceGrade?.label || ''));
   const highScoreAnchor = (benchmark?.matched || []).some((entry) => entry.scoreBand?.isHighScore || /高分|佳作|一类|下水|师生同写/.test(String(`${entry.docRole || ''}${entry.sourceFile || ''}`)));
 
   if (wordCount < 120) return { band: '五类卷（20分以下）', min: 0, max: 20, reason: '字数极少或只有标题，按五类卷处理。' };
   if (riskScore < 35 && bridge < 35) return { band: '四类卷（21-38分）', min: 21, max: 38, reason: '偏离材料核心，先压入四类卷区间。' };
+  if (wordCount >= 700 && sourceHighScore && profileScore >= 72 && structureBasic && languageBasic) {
+    return { band: '一类卷（63-70分）', min: 63, max: 70, reason: '资料原评为高分且正文高分画像达标，先进入一类复核区间，再看档内质量。' };
+  }
+  if (wordCount >= 760 && profileScore >= 84 && highScoreProfile?.topicCoverage >= 66 && highScoreProfile?.moveScore >= 68 && structureBasic && languageBasic) {
+    return { band: '一类卷（63-70分）', min: 63, max: 70, reason: '正文段落节奏、思辨动作与中心轴接近OB高分范文画像，允许进入一类复核。' };
+  }
+  if (wordCount >= 680 && profileScore >= 74 && highScoreProfile?.moveScore >= 60 && structureBasic && languageBasic) {
+    return { band: '二类卷（52-62分）', min: 52, max: 62, reason: '正文已具备高分文的若干动作，但题眼覆盖或论证密度仍需档内核验。' };
+  }
   if (wordCount >= 700 && benchmarkScore >= 82 && highScoreAnchor && expert >= 78 && bridge >= 62 && thesisBasic && structureBasic && languageBasic) {
     return { band: '一类卷（63-70分）', min: 63, max: 70, reason: 'OB高分库命中同型一类标杆，且正文中心轴、语义关联和结构证据能支撑一类复核。' };
   }
@@ -5554,6 +5715,8 @@ function buildObsidianScoreEngineDecision({ benchmark, sourceGrade, expert, brid
   const benchmarkScore = Number(benchmark?.score || 0);
   const matchedCount = (benchmark?.matched || []).length;
   const top = benchmark?.matched?.[0] || null;
+  const profile = benchmark?.highScoreProfile || null;
+  const profileScore = Number(profile?.score || 0);
   const highScoreAnchor = (benchmark?.matched || []).some((entry) => entry.scoreBand?.isHighScore || /高分|佳作|一类|下水|师生同写/.test(String(`${entry.docRole || ''}${entry.sourceFile || ''}`)));
   let effect = '不调整';
   let floor = 0;
@@ -5563,11 +5726,23 @@ function buildObsidianScoreEngineDecision({ benchmark, sourceGrade, expert, brid
   } else {
     evidence.push('未命中可用OB标杆。');
   }
+  if (profile) {
+    evidence.push(`高分画像${profileScore}/100：${profile.strengths?.slice(0, 3).join('、') || profile.label}。`);
+  }
   if (benchmarkScore >= 82 && highScoreAnchor && wordCount >= 700 && expert >= 78 && bridge >= 62) {
     effect = '强标杆复核：允许进入一类区间';
     floor = 63;
+  } else if (profileScore >= 86 && Number(profile?.moveScore || 0) >= 72 && wordCount >= 760) {
+    effect = '高分画像复核：段落节奏与思辨动作接近一类卷';
+    floor = 63;
+  } else if (sourceGrade?.score >= 63 && profileScore >= 74 && wordCount >= 700) {
+    effect = '资料原评+高分画像双校准：防止误压低档';
+    floor = Math.max(floor, clamp(Number(sourceGrade.score || 66) - 3, 63, 68));
   } else if (benchmarkScore >= 74 && highScoreAnchor && wordCount >= 650 && expert >= 72 && bridge >= 55) {
     effect = '同型高分校准：设置二类上限复核下限';
+    floor = 58;
+  } else if (profileScore >= 78 && Number(profile?.moveScore || 0) >= 62 && wordCount >= 680) {
+    effect = '高分画像轻校准：先进入二类上复核';
     floor = 58;
   } else if (benchmarkScore >= 66 && highScoreAnchor && wordCount >= 600 && expert >= 68) {
     effect = '轻度校准：防止误压低档';
@@ -5579,6 +5754,7 @@ function buildObsidianScoreEngineDecision({ benchmark, sourceGrade, expert, brid
   }
   return {
     benchmarkScore,
+    profileScore,
     matchedCount,
     highScoreAnchor,
     topTitle: top?.title || '',
@@ -5651,6 +5827,20 @@ function computeShanghaiOfficialScore({ originalDraft, draft, offTopic, intent, 
   if (benchmarkLift) {
     rawScore += benchmarkLift;
     adjustments.push(`OB高分范文标杆命中，按高分特征补偿${benchmarkLift}分。`);
+  }
+  const profile = benchmark?.highScoreProfile || null;
+  const profileScore = Number(profile?.score || 0);
+  const sourceHighScore = Number(sourceGrade?.score || 0) >= 63 || /一类|上等/.test(String(sourceGrade?.label || ''));
+  if (sourceHighScore && wordCount >= 700 && profileScore >= 74) {
+    const sourceFloor = clamp(Number(sourceGrade?.score || 66) - 4, 60, 68);
+    if (rawScore < sourceFloor) {
+      rawScore = sourceFloor;
+      adjustments.push(`资料原评与高分画像同时成立，独立分低于标杆过多，回调到${sourceFloor}分复核线。`);
+    }
+  }
+  if (!sourceGrade && wordCount >= 760 && profileScore >= 86 && Number(profile?.moveScore || 0) >= 72 && rawScore < 63) {
+    rawScore = 63;
+    adjustments.push('无资料原评但高分画像强，先给一类入口复核线63分。');
   }
 
   let finalScore = clamp(rawScore, 0, 70);
@@ -6058,7 +6248,7 @@ function renderVisibleObsidianSuggestionBlock(items) {
   `;
 }
 
-async function buildObsidianHighScoreBenchmark(topic, draft, analysis, offTopic) {
+async function buildObsidianHighScoreBenchmark(topic, draft, analysis, offTopic, checks = {}) {
   const index = await loadObsidianEntryIndex();
   const supportProfile = getEmbeddedObsidianSupportProfile();
   const signals = offTopic?.expertSignals || assessExpertEssaySignals(topic, draft, {
@@ -6081,7 +6271,8 @@ async function buildObsidianHighScoreBenchmark(topic, draft, analysis, offTopic)
   const theme = inferObsidianThemeTag(topic, draft);
   const themeMatch = scored.some((entry) => theme && entry.themeTag === theme);
   const highScoreMatch = scored.some((entry) => entry.scoreBand?.isHighScore);
-  const score = clamp(
+  const highScoreProfile = buildHighScoreEssayProfile(topic, draft, analysis, offTopic, checks);
+  const corpusScore = clamp(
     Math.round(topMatch * 0.38 + Number(signals.score || 0) * 0.28 + bridge * 0.18 + selfAxis * 0.16)
       + (typeMatch ? 4 : 0)
       + (themeMatch ? 3 : 0)
@@ -6089,7 +6280,12 @@ async function buildObsidianHighScoreBenchmark(topic, draft, analysis, offTopic)
     0,
     100
   );
+  const profileBackfill = supportProfile?.highScoreCount
+    ? clamp(Math.round(highScoreProfile.score * 0.82 + (highScoreProfile.moveScore || 0) * 0.12 + (highScoreProfile.rhythmScore || 0) * 0.06), 0, 100)
+    : 0;
+  const score = clamp(Math.max(corpusScore, profileBackfill), 0, 100);
   const traits = [];
+  traits.push(`高分画像：${highScoreProfile.label}（${highScoreProfile.score}/100）`);
   if (Number(signals.score || 0) >= 78) traits.push('论证节奏接近高分范文');
   if (bridge >= 68) traits.push('题意关联稳定');
   if (selfAxis >= 65) traits.push('自拟中心轴贯穿明显');
@@ -6099,8 +6295,10 @@ async function buildObsidianHighScoreBenchmark(topic, draft, analysis, offTopic)
   if (!traits.length) traits.push('暂未形成稳定高分特征');
   return {
     score,
+    corpusScore,
     indexSize: index.length,
     supportProfile,
+    highScoreProfile,
     matched: scored.map((entry) => ({
       title: entry.title || entry.topicKey || '未命名范文',
       docRole: entry.docRole || '',
@@ -6118,19 +6316,29 @@ async function buildObsidianHighScoreBenchmark(topic, draft, analysis, offTopic)
 function renderObsidianBenchmarkPanel(report) {
   const benchmark = report.officialScore?.obsidianBenchmark || report.obsidianBenchmark;
   const sourceComparison = report.officialScore?.sourceComparison;
-  const profile = benchmark?.supportProfile || getEmbeddedObsidianSupportProfile();
-  const profileLine = profile?.total
-    ? `OB库共${profile.total}篇，含${profile.highScoreCount || 0}篇高分/可作标杆档案；主要支撑：${Object.entries(profile.trainingUseCounts || {}).slice(0, 4).map(([k, v]) => `${k}${v}`).join('、')}`
+  const supportProfile = benchmark?.supportProfile || getEmbeddedObsidianSupportProfile();
+  const profileLine = supportProfile?.total
+    ? `OB库共${supportProfile.total}篇，含${supportProfile.highScoreCount || 0}篇高分/可作标杆档案；主要支撑：${Object.entries(supportProfile.trainingUseCounts || {}).slice(0, 4).map(([k, v]) => `${k}${v}`).join('、')}`
     : '';
   const matchedRows = (benchmark?.matched || []).slice(0, 3).map((item) => `
     <li>${escapeHtml(item.title)}｜${escapeHtml(item.docRole || item.sourceFile || 'OB档案')}｜${escapeHtml(item.topicType || '题型未标')}｜${escapeHtml(item.themeTag || '母题未标')}｜${item.scoreBand?.isHighScore ? '高分标杆｜' : ''}匹配${Math.round(item.matchScore || 0)}</li>
   `).join('');
   const traitRows = (benchmark?.traits || []).map((item) => `<li>${escapeHtml(item)}</li>`).join('');
+  const profile = benchmark?.highScoreProfile || null;
+  const profileRows = profile ? `
+    <div class="score-grid">
+      <div class="flaw-row"><div class="flaw-row-top"><span>题眼覆盖</span><strong>${Math.round(profile.topicCoverage || 0)}/100</strong></div><p>看核心概念是否贯穿多段，而不是只在开头出现。</p></div>
+      <div class="flaw-row"><div class="flaw-row-top"><span>思辨动作</span><strong>${Math.round(profile.moveScore || 0)}/100</strong></div><p>统计界定、转折、机制、边界、现实关联等高分动作。</p></div>
+      <div class="flaw-row"><div class="flaw-row-top"><span>段落节奏</span><strong>${Math.round(profile.rhythmScore || 0)}/100</strong></div><p>检查是否像完整考场议论文，而不是片段式讲评。</p></div>
+      <div class="flaw-row"><div class="flaw-row-top"><span>中心轴</span><strong>${Math.round(profile.thesisAxisScore || 0)}/100</strong></div><p>看中心判断是否在后文持续推进。</p></div>
+    </div>
+  ` : '';
   return `
     <div class="agent-result-block">
       <h4>OB高分范文标杆校准</h4>
       <p><strong>标杆命中</strong>：${benchmark?.indexSize ? `已加载${benchmark.indexSize}篇OB高分档案，匹配度 ${Math.round(benchmark.score || 0)}/100` : '未加载到OB索引，暂用规则评分'}</p>
       ${profileLine ? `<p><strong>库画像</strong>：${escapeHtml(profileLine)}</p>` : ''}
+      ${profile ? `<p><strong>高分画像</strong>：${escapeHtml(profile.label)}｜总相似度 ${Math.round(profile.score || 0)}/100｜${escapeHtml((profile.strengths || []).join('、') || '暂无明显优势')}</p>${profileRows}` : ''}
       <p><strong>高分特征</strong></p>
       <ul>${traitRows || '<li>暂未形成稳定高分特征。</li>'}</ul>
       <p><strong>相近范文</strong></p>
@@ -6150,6 +6358,7 @@ function renderObsidianScoreEngineDecision(report) {
       <div class="score-grid">
         <div class="flaw-row">
           <div class="flaw-row-top"><span>标杆强度</span><strong>${Math.round(decision.benchmarkScore || 0)}/100</strong></div>
+          <p><strong>高分画像</strong>：${Math.round(decision.profileScore || 0)}/100</p>
           <p><strong>命中情况</strong>：${decision.matchedCount || 0}篇｜${decision.highScoreAnchor ? '含高分/一类标杆' : '暂无明确高分标杆'}</p>
           <p><strong>最相近档案</strong>：${escapeHtml(decision.topTitle || '暂无')}</p>
         </div>
@@ -6225,6 +6434,265 @@ function renderObsidianTutorIntro(panel) {
       <p class="agent-para-issues">建议用法：先输入题目点“推荐3篇”，再解剖其中一篇，看第几段、学什么动作。</p>
     </div>
   `;
+}
+
+function getObsidianKnowledgeEntries() {
+  const index = getEmbeddedObsidianEntryIndex();
+  if (Array.isArray(index) && index.length) return index;
+  return getObsidianTeachingEssays().map((essay) => ({
+    id: essay.id,
+    title: essay.title,
+    folder: essay.folder || '',
+    notePath: essay.notePath || essay.relativePath || '',
+    relativePath: essay.relativePath || essay.notePath || '',
+    wikiPath: essay.wikiPath || '',
+    yearLabel: essay.yearLabel || '',
+    docRole: essay.docRole || '',
+    topicType: essay.topicType || '',
+    themeTag: essay.themeTag || '',
+    trainingUses: essay.trainingUses || [],
+    scoreBand: essay.scoreBand || null,
+    anchorTerms: essay.anchorTerms || [],
+    promptSamples: essay.promptSamples || [],
+    preview: essay.preview || essay.thesis || essay.topicKey || ''
+  }));
+}
+
+function getObsidianKnowledgeEntryById(id) {
+  return getObsidianKnowledgeEntries().find((entry) => entry.id === id) || null;
+}
+
+function getObsidianEntryFolder(entry) {
+  const folder = String(entry?.folder || '').replace(/\\/g, '/').trim();
+  return folder && folder !== '.' ? folder : '根目录';
+}
+
+function buildObsidianKnowledgeSearchText(entry) {
+  return normalizeObsidianMatchText([
+    entry?.title,
+    entry?.folder,
+    entry?.notePath,
+    entry?.relativePath,
+    entry?.yearLabel,
+    entry?.docRole,
+    entry?.topicType,
+    entry?.themeTag,
+    entry?.topicKey,
+    entry?.preview,
+    ...(entry?.anchorTerms || []),
+    ...(entry?.promptSamples || []),
+    ...(entry?.trainingUses || [])
+  ].filter(Boolean).join(' '));
+}
+
+function getObsidianKnowledgeFilters() {
+  const entries = getObsidianKnowledgeEntries();
+  const folders = dedupeArray(entries.map(getObsidianEntryFolder)).sort((a, b) => a.localeCompare(b, 'zh-Hans-CN'));
+  const types = dedupeArray(entries.map((entry) => entry.topicType || '未分类')).sort((a, b) => a.localeCompare(b, 'zh-Hans-CN'));
+  return { folders, types };
+}
+
+function populateObsidianKnowledgeFilters(folderSelect, typeSelect) {
+  const { folders, types } = getObsidianKnowledgeFilters();
+  if (folderSelect) {
+    folderSelect.innerHTML = [
+      '<option value="all">目录：全部</option>',
+      ...folders.map((folder) => `<option value="${escapeHtml(folder)}">${escapeHtml(folder)}</option>`)
+    ].join('');
+  }
+  if (typeSelect) {
+    typeSelect.innerHTML = [
+      '<option value="all">题型：全部</option>',
+      ...types.map((type) => `<option value="${escapeHtml(type)}">${escapeHtml(type)}</option>`)
+    ].join('');
+  }
+}
+
+function filterObsidianKnowledgeEntries({ query = '', folder = 'all', type = 'all' } = {}) {
+  const q = normalizeObsidianMatchText(query);
+  return getObsidianKnowledgeEntries().filter((entry) => {
+    if (folder && folder !== 'all' && getObsidianEntryFolder(entry) !== folder) return false;
+    if (type && type !== 'all' && String(entry.topicType || '未分类') !== type) return false;
+    if (!q) return true;
+    return buildObsidianKnowledgeSearchText(entry).includes(q);
+  });
+}
+
+function renderObsidianKnowledgeEntryCard(entry) {
+  const folder = getObsidianEntryFolder(entry);
+  const tags = [entry.yearLabel, entry.topicType, entry.themeTag, entry.scoreBand?.isHighScore ? '高分标杆' : '', entry.docRole]
+    .filter(Boolean)
+    .slice(0, 5)
+    .map((tag) => `<span class="agent-tag">${escapeHtml(tag)}</span>`)
+    .join('');
+  return `
+    <div class="ob-kb-item">
+      <div class="ob-kb-item-main">
+        <strong>${escapeHtml(entry.title || entry.topicKey || '未命名档案')}</strong>
+        <span>${escapeHtml(folder)}｜${escapeHtml(entry.notePath || entry.relativePath || '')}</span>
+        <div class="agent-tags">${tags || '<span class="agent-tag">未分类</span>'}</div>
+        <p>${escapeHtml(summarizeSentence(entry.preview || (entry.promptSamples || [])[0] || '', 86))}</p>
+      </div>
+      <div class="ob-kb-item-actions">
+        <button class="agent-btn ghost" type="button" data-ob-kb-id="${escapeHtml(entry.id)}">查看</button>
+        <button class="agent-btn ghost" type="button" data-ob-kb-read-id="${escapeHtml(entry.id)}">读原文</button>
+      </div>
+    </div>
+  `;
+}
+
+function groupObsidianKnowledgeByFolder(entries) {
+  return entries.reduce((groups, entry) => {
+    const folder = getObsidianEntryFolder(entry);
+    if (!groups[folder]) groups[folder] = [];
+    groups[folder].push(entry);
+    return groups;
+  }, {});
+}
+
+function renderObsidianKnowledgeDirectory(panel, state = {}) {
+  if (!panel) return;
+  const entries = filterObsidianKnowledgeEntries(state);
+  const grouped = groupObsidianKnowledgeByFolder(entries);
+  const folders = Object.keys(grouped).sort((a, b) => a.localeCompare(b, 'zh-Hans-CN'));
+  const total = getObsidianKnowledgeEntries().length;
+  const queryHint = state.query ? `｜关键词：${state.query}` : '';
+  const folderHint = state.folder && state.folder !== 'all' ? `｜目录：${state.folder}` : '';
+  const typeHint = state.type && state.type !== 'all' ? `｜题型：${state.type}` : '';
+  const folderHtml = folders.map((folder, index) => {
+    const list = grouped[folder].slice(0, 40).map(renderObsidianKnowledgeEntryCard).join('');
+    const extra = grouped[folder].length > 40 ? `<p class="agent-empty">该目录还有 ${grouped[folder].length - 40} 篇未展开，可继续用关键词缩小范围。</p>` : '';
+    return `
+      <details class="ob-kb-folder" ${index < 2 ? 'open' : ''}>
+        <summary><strong>${escapeHtml(folder)}</strong><span>${grouped[folder].length}篇</span></summary>
+        <div class="ob-kb-list">${list}${extra}</div>
+      </details>
+    `;
+  }).join('');
+  panel.innerHTML = `
+    <div class="ob-kb-summary">
+      <strong>OB知识库目录</strong>
+      <span>已收录 ${total} 篇，本次显示 ${entries.length} 篇${escapeHtml(queryHint + folderHint + typeHint)}</span>
+    </div>
+    ${folderHtml || '<p class="agent-empty">没有匹配结果。可以换关键词，如“认可度”“断舍离”“专转传”“一类”。</p>'}
+  `;
+}
+
+function buildObsidianKnowledgeLearningActions(entry) {
+  const role = String(`${entry?.docRole || ''}${entry?.topicType || ''}${entry?.themeTag || ''}`);
+  const actions = [];
+  if (/评分|标准/.test(role)) actions.push('把它当评分尺：看哪些维度会影响分档，不要当范文抄。');
+  if (/方法|议论文|写作/.test(role)) actions.push('把它当方法卡：提炼“概念辨析-分类讨论-现实关联”的动作。');
+  if (/高分|佳作|下水|同题/.test(role) || entry?.scoreBand?.isHighScore) actions.push('把它当对照文：先看开头如何立中心，再看中段如何补机制。');
+  if (/真题|命题|评析|回顾/.test(role)) actions.push('把它当审题资料：看出题人真正想考的关系和边界。');
+  if (!actions.length) actions.push('先看标题、题型、母题和摘要，判断它适合用来审题、成文还是批改。');
+  actions.push('回到自己的作文时，只迁移一个动作：段首回题眼、例后补机制、结尾补边界三选一。');
+  return dedupeArray(actions).slice(0, 4);
+}
+
+function renderObsidianKnowledgeEntry(entry, panel, fullText = '') {
+  if (!entry || !panel) return;
+  const teachingEssay = getObsidianTeachingEssayById(entry.id);
+  const actions = buildObsidianKnowledgeLearningActions(entry).map((item) => `<li>${escapeHtml(item)}</li>`).join('');
+  const promptRows = (entry.promptSamples || []).slice(0, 3).map((item) => `<li>${escapeHtml(item)}</li>`).join('');
+  const fullTextBlock = fullText
+    ? `<div class="ob-kb-fulltext">${renderObsidianMarkdownPreview(fullText, 4200)}</div>`
+    : `<p class="agent-empty">点击“读原文”可加载 Markdown 正文预览；若本地 file 打开受限，请用 http://127.0.0.1:5500 访问。</p>`;
+  panel.innerHTML = `
+    <div class="agent-result-block ob-kb-detail">
+      <h4>${escapeHtml(entry.title || 'OB档案')}</h4>
+      <p><strong>目录</strong>：${escapeHtml(getObsidianEntryFolder(entry))}</p>
+      <p><strong>路径</strong>：${escapeHtml(entry.notePath || entry.relativePath || '')}</p>
+      <p><strong>标签</strong>：${escapeHtml([entry.yearLabel, entry.docRole, entry.topicType, entry.themeTag, entry.scoreBand?.label || (entry.scoreBand?.isHighScore ? '高分标杆' : '')].filter(Boolean).join('｜') || '未标注')}</p>
+      <p><strong>摘要</strong>：${escapeHtml(entry.preview || '暂无摘要')}</p>
+      <p><strong>题目/摘录</strong></p>
+      <ul>${promptRows || '<li>暂无题目摘录。</li>'}</ul>
+      <p><strong>怎么用</strong></p>
+      <ul>${actions}</ul>
+      <div class="agent-actions quiet-actions">
+        ${teachingEssay ? `<button class="agent-btn primary" type="button" data-ob-dissect-id="${escapeHtml(entry.id)}">解剖这篇</button><button class="agent-btn ghost" type="button" data-ob-task-id="${escapeHtml(entry.id)}">生成对照任务卡</button>` : ''}
+        <button class="agent-btn ghost" type="button" data-ob-kb-read-id="${escapeHtml(entry.id)}">读原文</button>
+        <button class="agent-btn ghost" type="button" data-ob-kb-back="1">返回目录</button>
+      </div>
+    </div>
+    ${fullTextBlock}
+  `;
+}
+
+function renderObsidianMarkdownPreview(markdown, limit = 4200) {
+  const source = String(markdown || '').replace(/^---\n[\s\S]*?\n---\n?/, '').trim();
+  const clipped = source.length > limit ? `${source.slice(0, limit)}\n\n……（已截取前${limit}字，完整内容请在 Obsidian 中查看）` : source;
+  return clipped.split(/\r?\n/).map((line) => {
+    const clean = escapeHtml(line.trim());
+    if (!clean) return '<br />';
+    if (/^#{1,3}\s+/.test(line)) return `<h5>${clean.replace(/^#{1,3}\s+/, '')}</h5>`;
+    if (/^[-*]\s+/.test(line)) return `<p>• ${clean.replace(/^[-*]\s+/, '')}</p>`;
+    return `<p>${clean}</p>`;
+  }).join('');
+}
+
+async function loadObsidianMarkdown(entry) {
+  if (!entry?.relativePath && !entry?.notePath) return '';
+  const path = String(entry.relativePath || entry.notePath).replace(/\\/g, '/');
+  const url = `obsidian_vault/${path.split('/').map((part) => encodeURIComponent(part)).join('/')}`;
+  const response = await fetch(url, { cache: 'no-store' });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return response.text();
+}
+
+function initObsidianKnowledgeBrowser({ searchInput, folderSelect, typeSelect, searchBtn, resetBtn, panel, tutorPanel, essaySelect, topicInput }) {
+  if (!panel) return;
+  populateObsidianKnowledgeFilters(folderSelect, typeSelect);
+  const getState = () => ({
+    query: searchInput?.value?.trim() || '',
+    folder: folderSelect?.value || 'all',
+    type: typeSelect?.value || 'all'
+  });
+  const renderCurrent = () => renderObsidianKnowledgeDirectory(panel, getState());
+  renderCurrent();
+  searchBtn?.addEventListener('click', renderCurrent);
+  searchInput?.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') renderCurrent();
+  });
+  folderSelect?.addEventListener('change', renderCurrent);
+  typeSelect?.addEventListener('change', renderCurrent);
+  resetBtn?.addEventListener('click', () => {
+    if (searchInput) searchInput.value = '';
+    if (folderSelect) folderSelect.value = 'all';
+    if (typeSelect) typeSelect.value = 'all';
+    renderCurrent();
+  });
+  panel.addEventListener('click', async (event) => {
+    const backBtn = event.target.closest('[data-ob-kb-back]');
+    if (backBtn) return void renderCurrent();
+    const viewBtn = event.target.closest('[data-ob-kb-id]');
+    const readBtn = event.target.closest('[data-ob-kb-read-id]');
+    const dissectBtn = event.target.closest('[data-ob-dissect-id]');
+    const taskBtn = event.target.closest('[data-ob-task-id]');
+    if (dissectBtn || taskBtn) {
+      const essay = getObsidianTeachingEssayById(dissectBtn?.dataset.obDissectId || taskBtn?.dataset.obTaskId);
+      if (!essay) return;
+      if (dissectBtn) {
+        if (essaySelect) essaySelect.value = essay.id;
+        renderObsidianEssayDissection(essay, tutorPanel, topicInput?.value?.trim() || '');
+      }
+      if (taskBtn) renderObsidianComparisonTaskCard(essay, topicInput?.value?.trim() || '', tutorPanel);
+      return;
+    }
+    const targetId = viewBtn?.dataset.obKbId || readBtn?.dataset.obKbReadId;
+    if (!targetId) return;
+    const entry = getObsidianKnowledgeEntryById(targetId);
+    if (!entry) return;
+    if (viewBtn) return void renderObsidianKnowledgeEntry(entry, panel);
+    panel.innerHTML = '<p class="agent-empty">正在读取 Obsidian 原文...</p>';
+    try {
+      const markdown = await loadObsidianMarkdown(entry);
+      renderObsidianKnowledgeEntry(entry, panel, markdown);
+    } catch (error) {
+      renderObsidianKnowledgeEntry(entry, panel, '');
+      panel.insertAdjacentHTML('afterbegin', `<p class="agent-empty">原文读取失败：${escapeHtml(error?.message || '未知错误')}。请确认用本地服务器打开页面，而不是直接 file:// 打开。</p>`);
+    }
+  });
 }
 
 function buildTeachingEssayMetaLine(essay) {
@@ -6510,7 +6978,7 @@ async function buildShanghaiTeacherReviewReport(topic, draft, options = {}) {
   const handwriting = options.precomputedHandwriting || await assessHandwritingByOCR(reviewDraft);
   let obsidianBenchmark = null;
   try {
-    obsidianBenchmark = await buildObsidianHighScoreBenchmark(topic, reviewDraft, analysis, offTopic);
+    obsidianBenchmark = await buildObsidianHighScoreBenchmark(topic, reviewDraft, analysis, offTopic, { thesis, argument, language, structure });
   } catch (_) {
     obsidianBenchmark = { score: 0, indexSize: 0, matched: [], traits: ['OB标杆暂未加载，使用本地规则评分。'] };
   }

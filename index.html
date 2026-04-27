@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;900&family=ZCOOL+KuaiLe&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="styles.css?v=57" />
+    <link rel="stylesheet" href="styles.css?v=58" />
 </head>
 <body>
   <div class="bg-particles" id="particles"></div>
@@ -156,6 +156,16 @@
             </select>
             <button id="obActionBankBtn" class="agent-btn ghost" type="button">查看高分动作库</button>
           </div>
+          <div class="ob-kb-toolbar">
+            <input id="obKnowledgeSearchInput" class="timeline-select ob-kb-search" type="search" placeholder="搜索OB知识库：题目 / 年份 / 关键词 / 文件夹" />
+            <select id="obKnowledgeFolderSelect" class="timeline-select" title="按OB文件夹筛选"></select>
+            <select id="obKnowledgeTypeSelect" class="timeline-select" title="按题型筛选"></select>
+            <button id="obKnowledgeSearchBtn" class="agent-btn ghost" type="button">搜索知识库</button>
+            <button id="obKnowledgeResetBtn" class="agent-btn ghost" type="button">显示目录</button>
+          </div>
+          <div id="obKnowledgePanel" class="ob-knowledge-panel">
+            <p class="agent-empty">OB知识库目录会显示在这里，可按文件夹或关键词快速查找范文。</p>
+          </div>
           <div id="obTutorPanel" class="material-card-list">
             <p class="agent-empty">选择一篇范文解剖，或输入题目后点击“推荐3篇”。</p>
           </div>
@@ -215,6 +225,6 @@
     <script src="data.js?v=72"></script>
     <script src="obsidian_index.js?v=2"></script>
     <script src="obsidian_teaching_assets.js?v=2"></script>
-    <script src="app.js?v=73"></script>
+    <script src="app.js?v=75"></script>
 </body>
 </html>
