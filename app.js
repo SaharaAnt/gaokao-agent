@@ -107,6 +107,123 @@ const OB_SHANGHAI_SCORE_STANDARD = {
   }
 };
 
+const SHANGHAI_SCORE_CALIBRATION_ANCHORS = [
+  {
+    id: 'class1-upper-ob',
+    label: '一类上锚点：思想深度与结构节奏都成立',
+    bandKey: 'class1',
+    expectedScore: 68,
+    tolerance: 4,
+    profile: {
+      topicAccuracy: 84,
+      thoughtDepth: 88,
+      thesisStable: 76,
+      logicStrength: 82,
+      structureStable: 82,
+      languageStable: 76,
+      materialFit: 72,
+      fullness: 96,
+      innovation: 82
+    },
+    note: '适合校准“老师下水文/OB一类文被规则误压”的情况。'
+  },
+  {
+    id: 'class1-entry',
+    label: '一类入口锚点：扣题稳定且有边界反思',
+    bandKey: 'class1',
+    expectedScore: 63,
+    tolerance: 4,
+    profile: {
+      topicAccuracy: 80,
+      thoughtDepth: 82,
+      thesisStable: 68,
+      logicStrength: 76,
+      structureStable: 74,
+      languageStable: 66,
+      materialFit: 66,
+      fullness: 92,
+      innovation: 74
+    },
+    note: '适合校准“能进一类但语言或素材不算拔尖”的作文。'
+  },
+  {
+    id: 'class2-upper',
+    label: '二类上锚点：合格完整，有局部新意',
+    bandKey: 'class2',
+    expectedScore: 60,
+    tolerance: 4,
+    profile: {
+      topicAccuracy: 72,
+      thoughtDepth: 68,
+      thesisStable: 64,
+      logicStrength: 66,
+      structureStable: 66,
+      languageStable: 62,
+      materialFit: 58,
+      fullness: 88,
+      innovation: 64
+    },
+    note: '适合校准“基本会写、但还没有一类深度”的作文。'
+  },
+  {
+    id: 'class2-middle',
+    label: '二类中锚点：符合题意，平稳过关',
+    bandKey: 'class2',
+    expectedScore: 56,
+    tolerance: 4,
+    profile: {
+      topicAccuracy: 64,
+      thoughtDepth: 58,
+      thesisStable: 58,
+      logicStrength: 58,
+      structureStable: 60,
+      languageStable: 58,
+      materialFit: 52,
+      fullness: 84,
+      innovation: 54
+    },
+    note: '适合校准“中心明确、论证较平”的普通过关卷。'
+  },
+  {
+    id: 'class3-upper',
+    label: '三类上锚点：基本符合题意但展开不足',
+    bandKey: 'class3',
+    expectedScore: 48,
+    tolerance: 5,
+    profile: {
+      topicAccuracy: 50,
+      thoughtDepth: 44,
+      thesisStable: 44,
+      logicStrength: 42,
+      structureStable: 48,
+      languageStable: 48,
+      materialFit: 42,
+      fullness: 72,
+      innovation: 38
+    },
+    note: '适合校准“能碰题但中心轴不稳、例后分析少”的作文。'
+  },
+  {
+    id: 'class4',
+    label: '四类锚点：偏离题意或内容空转',
+    bandKey: 'class4',
+    expectedScore: 31,
+    tolerance: 6,
+    profile: {
+      topicAccuracy: 30,
+      thoughtDepth: 24,
+      thesisStable: 24,
+      logicStrength: 22,
+      structureStable: 34,
+      languageStable: 38,
+      materialFit: 24,
+      fullness: 56,
+      innovation: 20
+    },
+    note: '适合校准“写得像文章但没抓材料核心”的作文。'
+  }
+];
+
 let handwritingOcrScriptPromise = null;
 
 const TIMELINE_SCORE_GUIDE = {
@@ -5692,6 +5809,133 @@ function buildShanghaiOfficialRubricSignals({ offTopic, thesis, argument, materi
   };
 }
 
+function getShanghaiBandKeyByScore(score) {
+  const n = Number(score || 0);
+  if (n >= 63) return 'class1';
+  if (n >= 52) return 'class2';
+  if (n >= 39) return 'class3';
+  if (n >= 21) return 'class4';
+  return 'class5';
+}
+
+function getShanghaiBandKeyFromLabel(label) {
+  const text = String(label || '');
+  if (/一类/.test(text)) return 'class1';
+  if (/二类/.test(text)) return 'class2';
+  if (/三类/.test(text)) return 'class3';
+  if (/四类/.test(text)) return 'class4';
+  if (/五类/.test(text)) return 'class5';
+  return '';
+}
+
+function scoreCalibrationAnchorDistance(anchor, signals = {}) {
+  const profile = anchor.profile || {};
+  const weights = {
+    topicAccuracy: 1.28,
+    thoughtDepth: 1.22,
+    thesisStable: 1,
+    logicStrength: 1.05,
+    structureStable: 0.9,
+    languageStable: 0.78,
+    materialFit: 0.7,
+    fullness: 0.74,
+    innovation: 0.86
+  };
+  const keys = Object.keys(weights).filter((key) => typeof profile[key] === 'number');
+  const totalWeight = keys.reduce((sum, key) => sum + weights[key], 0) || 1;
+  const distance = keys.reduce((sum, key) => {
+    const current = Number(signals[key] || 0);
+    const target = Number(profile[key] || 0);
+    return sum + Math.abs(current - target) * weights[key];
+  }, 0) / totalWeight;
+  return clamp(Math.round(distance), 0, 100);
+}
+
+function findShanghaiScoreCalibrationAnchor({ signals, sourceGrade, benchmark, rawScore }) {
+  const sourceBandKey = sourceGrade?.score ? getShanghaiBandKeyByScore(sourceGrade.score) : '';
+  const rawBandKey = getShanghaiBandKeyByScore(rawScore);
+  const benchmarkScore = Number(benchmark?.score || 0);
+  const profileScore = Number(benchmark?.highScoreProfile?.score || 0);
+  const scored = SHANGHAI_SCORE_CALIBRATION_ANCHORS
+    .map((anchor) => {
+      const distance = scoreCalibrationAnchorDistance(anchor, signals);
+      let confidence = clamp(100 - distance, 0, 100);
+      if (sourceBandKey && sourceBandKey === anchor.bandKey) confidence += 8;
+      if (!sourceBandKey && rawBandKey === anchor.bandKey) confidence += 4;
+      if (anchor.bandKey === 'class1' && (benchmarkScore >= 78 || profileScore >= 82)) confidence += 5;
+      if (anchor.bandKey === 'class2' && benchmarkScore >= 66) confidence += 3;
+      return { ...anchor, distance, confidence: clamp(Math.round(confidence), 0, 100) };
+    })
+    .sort((a, b) => b.confidence - a.confidence);
+  return scored[0] || null;
+}
+
+function buildShanghaiScoreCalibrationDecision({ signals, sourceGrade, benchmark, rawScore, wordCount }) {
+  const anchor = findShanghaiScoreCalibrationAnchor({ signals, sourceGrade, benchmark, rawScore });
+  const sourceScore = Number(sourceGrade?.score || 0);
+  const sourceHighScore = sourceScore >= 63 || /一类|上等/.test(String(sourceGrade?.label || ''));
+  const rawBandKey = getShanghaiBandKeyByScore(rawScore);
+  const profile = benchmark?.highScoreProfile || null;
+  const supportHighScore = Number(profile?.score || 0) >= 78
+    || Number(benchmark?.score || 0) >= 74
+    || Number(signals?.thoughtDepth || 0) >= 74
+    || Number(signals?.innovation || 0) >= 76;
+  const strongHighScoreSupport = Number(profile?.score || 0) >= 84
+    || Number(benchmark?.score || 0) >= 80
+    || (
+      Number(signals?.topicAccuracy || 0) >= 82
+      && Number(signals?.thoughtDepth || 0) >= 82
+      && Number(signals?.innovation || 0) >= 78
+      && Number(signals?.structureStable || 0) >= 72
+    );
+  let target = rawScore;
+  let effect = '只做参照，不调整';
+  let confidence = Number(anchor?.confidence || 0);
+  const evidence = [];
+  if (anchor) {
+    evidence.push(`最接近“${anchor.label}”，置信度${confidence}/100，预期${anchor.expectedScore}分。`);
+  }
+  if (sourceGrade?.score) {
+    evidence.push(`检测到资料原评：${sourceGrade.label} ${sourceGrade.score}分。`);
+  }
+  if (profile) {
+    evidence.push(`OB高分画像${Math.round(profile.score || 0)}/100。`);
+  }
+
+  if (sourceHighScore && wordCount >= 720 && supportHighScore && rawScore < sourceScore - 5) {
+    target = clamp(sourceScore - 3, 63, Math.min(68, sourceScore));
+    effect = '资料原评+OB画像复核：防止一类样本被规则误压';
+    confidence = Math.max(confidence, 86);
+  } else if (anchor && confidence >= 86 && (
+    anchor.bandKey === rawBandKey
+    || sourceGrade?.score
+    || (strongHighScoreSupport && (anchor.bandKey !== 'class1' || wordCount >= 760))
+  ) && Math.abs(rawScore - anchor.expectedScore) >= 5) {
+    const maxStep = anchor.bandKey === 'class1' ? 4 : 3;
+    target = rawScore + clamp(anchor.expectedScore - rawScore, -maxStep, maxStep);
+    effect = rawScore < anchor.expectedScore ? '锚点校准：当前偏严，小幅上调' : '锚点校准：当前偏松，小幅下调';
+  } else if (anchor && confidence >= 80 && anchor.bandKey === 'class1' && rawScore < 63 && wordCount >= 760 && strongHighScoreSupport) {
+    target = 63;
+    effect = '一类入口锚点复核：先放入一类下限人工复核';
+  }
+
+  const bandProfile = getShanghaiBandProfile(getShanghaiBandKeyByScore(target) || anchor?.bandKey);
+  if (anchor?.bandKey && bandProfile) {
+    target = clamp(target, bandProfile.min, bandProfile.max);
+  }
+
+  return {
+    anchorId: anchor?.id || '',
+    anchorLabel: anchor?.label || '暂无稳定锚点',
+    expectedScore: anchor?.expectedScore || 0,
+    expectedBand: anchor ? getShanghaiBandProfile(anchor.bandKey).label : '',
+    confidence,
+    effect,
+    adjustedScore: Math.round(target),
+    evidence: evidence.join(' ')
+  };
+}
+
 function determineShanghaiSecondClassLane(signals) {
   if (signals.qualityScore >= 74 && (signals.innovation >= 72 || signals.thoughtDepth >= 70)) {
     return getShanghaiSecondClassLaneProfile('upper');
@@ -6065,6 +6309,18 @@ function computeShanghaiOfficialScore({ originalDraft, draft, offTopic, intent, 
     adjustments.push('无资料原评但高分画像强，先给一类入口复核线63分。');
   }
 
+  const calibrationDecision = buildShanghaiScoreCalibrationDecision({
+    signals: bandSignals,
+    sourceGrade,
+    benchmark,
+    rawScore,
+    wordCount
+  });
+  if (calibrationDecision && calibrationDecision.adjustedScore !== rawScore) {
+    rawScore = calibrationDecision.adjustedScore;
+    adjustments.push(`${calibrationDecision.effect}：${calibrationDecision.anchorLabel}，校准到${rawScore}分。`);
+  }
+
   let finalScore = clamp(rawScore, 0, 70);
   if (sourceGrade?.score && wordCount >= 600 && finalScore > Number(sourceGrade.score || 0) + 1) {
     finalScore = clamp(Number(sourceGrade.score || 0) + 1, 0, 70);
@@ -6100,7 +6356,8 @@ function computeShanghaiOfficialScore({ originalDraft, draft, offTopic, intent, 
     sourceGrade,
     sourceComparison,
     obsidianBenchmark: benchmark,
-    benchmarkDecision
+    benchmarkDecision,
+    calibrationDecision
   };
 }
 
@@ -6576,6 +6833,7 @@ function renderObsidianBenchmarkPanel(report) {
 
 function renderObsidianScoreEngineDecision(report) {
   const decision = report.officialScore?.benchmarkDecision;
+  const calibration = report.officialScore?.calibrationDecision;
   if (!decision) return '';
   return `
     <div class="agent-result-block">
@@ -6591,6 +6849,13 @@ function renderObsidianScoreEngineDecision(report) {
           <div class="flaw-row-top"><span>校准结论</span><strong>${escapeHtml(decision.effect || '不调整')}</strong></div>
           <p><strong>证据</strong>：${escapeHtml(decision.evidence || '暂无')}</p>
           <p><strong>下限处理</strong>：${decision.floor ? `设置复核下限 ${decision.floor} 分` : '不设置分数下限，仍按原文证据赋分'}</p>
+        </div>
+        <div class="flaw-row">
+          <div class="flaw-row-top"><span>评分锚点校准</span><strong>${escapeHtml(calibration?.anchorLabel || '暂无锚点')}</strong></div>
+          <p><strong>锚点预期</strong>：${escapeHtml(calibration?.expectedScore ? `${calibration.expectedBand}｜${calibration.expectedScore}分` : '暂无')}</p>
+          <p><strong>置信度</strong>：${escapeHtml(String(calibration?.confidence ?? '--'))}/100</p>
+          <p><strong>处理</strong>：${escapeHtml(calibration?.effect || '只做参照，不调整')}</p>
+          <p><strong>证据</strong>：${escapeHtml(calibration?.evidence || '暂无')}</p>
         </div>
       </div>
       <p class="agent-para-issues">这一步专门解决“好文章被关键词规则误杀”的问题：OB只负责复核分档，最终仍要看正文的中心轴、语义关联、结构与语言证据。</p>
@@ -8025,6 +8290,187 @@ async function runBaselineHealthCheck() {
   };
 }
 
+function getShanghaiScoreCalibrationSamples() {
+  const recognitionTopic = '生活中，人们常用认可度判别事物，区分高下。请写一篇文章，谈谈你对“认可度”的认识和思考。';
+  const newOldTopic = '这段话可以启发人们如何去认识事物。请写一篇文章，谈谈你的思考和感悟。';
+  return [
+    {
+      id: 'anchor-class1-source-68',
+      label: '一类上原评样本',
+      topic: newOldTopic,
+      expectedScore: 68,
+      tolerance: 4,
+      draft: [
+        '以旧维新 生生不息（一类上 68分）',
+        '',
+        '曹杨二中 高三 石英娜',
+        '',
+        '旧并不是停滞的同义词，新也不是凭空冒出的口号。真正有生命力的更新，往往是在对旧有经验的理解、辨析和转化中完成的。若只把旧看成负担，便会失去文化与经验的根；若只把新看成装饰，又会让改变停在表面。所谓以旧维新，正在于在继承中辨认可再生的力量，在更新中保留生命延续的脉络。',
+        '',
+        '从个人成长看，一个人并不是靠否定过去来获得新生。旧经验中有惯性，也有积累；有束缚，也有方法。学习中的错题、阅读中的旧见、生活中的习惯，若只被一概抛弃，就难以形成真正的反思。它们只有经过重新解释，才会成为新的判断力。由此可见，维新不是断裂，而是对旧有材料的再组织。',
+        '',
+        '从社会文化看，许多更新也不是抛开传统另起炉灶。传统戏曲进入新的舞台空间，古典诗词借由新的媒介被重新理解，城市街区在保护旧貌的同时更新公共功能，这些现象说明，旧并非只能被保存，也可以被激活。关键在于更新是否尊重原有肌理，是否让旧的价值在新的现实中继续发挥解释力。',
+        '',
+        '这种关系在今天尤其值得讨论。技术更新很快，观念变化也快，人们容易把速度误认为进步，把新鲜误认为创造。可是没有旧经验的校正，新常常只是短暂的热闹；没有新问题的召唤，旧也可能变成僵硬的陈列。真正的生长，恰恰发生在二者彼此照亮的时候。',
+        '',
+        '由此可见，旧与新的关系并不是时间先后的关系，而是价值生成的关系。旧提供沉淀、尺度和记忆，新提供问题、方法和可能。一个社会若只有旧，便缺少面向未来的勇气；若只有新，又容易失去判断的根基。二者相互校正，才构成持续更新的生命形态。',
+        '',
+        '当然，强调以旧维新，并不意味着守旧。若把旧物、旧制、旧观念都神圣化，更新就会变成保守的外衣。真正成熟的态度，是区分旧中可承续者与应被淘汰者：前者需要被转译，后者必须被扬弃。只有这样，新才不是轻浮的替换，旧也不是沉重的包袱。',
+        '',
+        '对青年而言，这种判断同样重要。学习传统，不是为了背负过去，而是为了获得更宽的坐标；拥抱新知，也不是为了抛弃来处，而是为了让旧有经验在新的现实中继续发生作用。当一个人能够在旧中发现可更新的资源，在新中守住不被流行裹挟的尺度，他才真正拥有面向未来的主体性。',
+        '',
+        '回到题目，生生不息的生命力，正在于旧与新之间并非简单对立。旧为新提供根系，新使旧获得再生。面对快速变化的时代，我们需要的不是盲目逐新，也不是固守旧壳，而是在辨析、转化与创造中完成延续。以旧维新，方能生生不息。'
+      ].join('\n')
+    },
+    {
+      id: 'anchor-class1-entry-63',
+      label: '一类入口样本',
+      topic: recognitionTopic,
+      expectedScore: 63,
+      tolerance: 5,
+      draft: [
+        '认可度不是价值本身，而是社会对价值的一种临时投票。它之所以常被用来判别事物，是因为现代生活充满选择，人们需要借助公共反馈降低判断成本；但它之所以值得警惕，也正在于公共反馈会把复杂价值压缩成单一数字。',
+        '',
+        '认可度首先具有工具意义。在陌生领域里，一个人的知识有限，完全脱离他人的经验并不现实。课程评分、医学科普的同行评价、城市公共服务的满意度，都能帮助我们快速发现较可靠的选项。这种认可并非真理，却是通向判断的入口。',
+        '',
+        '然而，把入口误认为终点，认可度就会反过来支配判断。社交平台上的热搜、排名和点赞，常把可传播性包装成价值本身。一个观点被大量转发，可能只是因为它足够刺激情绪；一个作品被暂时冷落，也可能只是因为它尚未遇到合适的理解者。认可度在这里暴露的不是价值的高下，而是传播机制的偏向。',
+        '',
+        '因此，问题的核心不在认可度，而在使用认可度的人是否保有主体意识。若把认可度当作参照，人仍会追问它的来源、范围和标准；若把认可度当作裁判，人便把自己的判断权交给了多数。二者只差一步，却决定了人是在借助社会经验，还是被社会目光规训。',
+        '',
+        '这种区分在今天尤其重要。校园里，有人根据热门专业选择道路，却忽略自己的能力结构；消费中，有人追逐爆款，却很少询问它是否真的适合自身生活。认可度提供了可见的安全感，也制造了隐蔽的同质化。它让人少走弯路，也可能让人不再走自己的路。',
+        '',
+        '当然，警惕认可度并不意味着崇拜小众。把不被认可等同于深刻，同样是一种反向依赖。真正值得追求的，是在公共意见与个人判断之间建立可反思的距离：既承认多数经验的参考价值，也保留对少数可能性的耐心。',
+        '',
+        '这种距离并不容易建立。越是在信息快速流动的环境里，人越容易把“大家都说好”当成省力的答案，也越容易把“不被理解”误认为自己的独特。认可度的复杂性正在于，它既可能是经验的沉淀，也可能是情绪的扩散；既可能帮助我们进入公共生活，也可能让我们失去独立判断的耐心。',
+        '',
+        '由此看来，认可度可以帮助我们判别事物，却不能最终决定事物的高下。它只有在标准清楚、来源可靠、主体不放弃思考的前提下，才具有合理性。一个人若能借认可度进入世界，又能超越认可度完成判断，才可能在众声喧哗中守住清醒。'
+      ].join('\n')
+    },
+    {
+      id: 'anchor-class2-middle-56',
+      label: '二类中样本',
+      topic: recognitionTopic,
+      expectedScore: 56,
+      tolerance: 5,
+      draft: [
+        '认可度是现代社会中常见的判断工具。它能帮助人们在大量选择中迅速作出决定，但它并不能等同于事物本身的价值。我们既不能完全拒绝认可度，也不能把认可度当成唯一标准。',
+        '',
+        '在信息过载的环境里，认可度有现实意义。一本书、一门课程、一项服务如果获得较多认可，至少说明它经过了一定范围的检验。对普通人来说，这种公共反馈可以降低选择成本，也能形成基本信任。',
+        '',
+        '但是，认可度也可能遮蔽独立判断。许多平台用点赞、转发和排名制造热度，人们容易把多数人的选择直接当成正确答案。此时，认可度不再是参考，而变成外部标准对主体思考的替代。',
+        '',
+        '所以，看待认可度需要条件意识。面对陌生领域，我们可以把它当作入口；面对价值判断，则应追问它来自哪些人、基于什么标准、是否经得起时间和实践检验。这样才能避免被单一指标牵着走。',
+        '',
+        '从校园生活看，这种问题并不遥远。有同学选择社团时只看人数多少，有同学选书时只看排行榜，也有同学把一次考试后的排名当成对自身价值的全部说明。这些做法都有现实原因，因为认可度能给人一种安全感；但如果缺少追问，它也会让人把外部评价误认为内在方向。',
+        '',
+        '进一步说，认可度的合理性取决于它是否能被解释。若一个选择受到认可，是因为它确实解决了问题、经受了检验，那么这种认可值得参考；若认可只是来自流量、从众或短暂情绪，它就不能承担判别高下的责任。这里的关键，不是认可度高不高，而是它背后的评价标准是否清楚。',
+        '',
+        '对青年而言，真正成熟的态度不是拒绝认可度，也不是被认可度牵引，而是在参考公共意见的同时保持自己的判断能力。只有这样，认可度才会成为认识世界的工具，而不是束缚自我的尺度。',
+        '',
+        '回到题目，认可度可以参与判断，却不应替代判断。它在信息不足时提供入口，在标准清楚时提供参考，在主体清醒时提供帮助；但一旦人放弃追问，它就会从工具变成枷锁。因此，面对认可度，我们更需要的是使用它的能力，而不是服从它的习惯。'
+      ].join('\n')
+    },
+    {
+      id: 'anchor-class3-boundary-41',
+      label: '三四类临界样本',
+      topic: recognitionTopic,
+      expectedScore: 41,
+      tolerance: 6,
+      draft: [
+        '认可度在人们生活中经常出现，很多人都会根据认可度来判断一件事好不好。认可度高的东西往往被更多人看见，也更容易获得机会。一本书被很多人推荐，一家店被很多人打高分，一个学生被老师和同学表扬，都会让人觉得它们比较好。这种想法有一定道理，因为别人的看法可以给我们参考，也可以让我们少走弯路。',
+        '',
+        '可是认可度也不一定完全可靠。大家喜欢的东西，有时只是因为它比较热闹，或者大家都在说。生活里有些人买东西只看销量，有些人选择兴趣只看别人学什么，这样虽然方便，却容易忽略自己的真实需要。有些暂时不被认可的事物，也可能在以后被人发现价值。因此，认可度不能成为唯一答案。',
+        '',
+        '在校园里也有类似情况。有人看到一个学习方法被很多同学推荐，就马上照着做；有人看到某个活动参加的人很多，就认为它一定很有价值。这些选择有时候是对的，但也可能只是大家互相影响。每个人的情况不一样，别人认可的东西不一定适合自己。',
+        '',
+        '社会上也常有这样的现象。一个话题被很多人讨论，就会让人觉得它重要；一个商品被很多人购买，就会让人觉得它好。可是热闹不一定代表真实价值，冷清也不一定代表没有意义。我们看待认可度时，不能只看人数多少，还要想一想自己真正需要什么。',
+        '',
+        '如果把认可度当成唯一标准，人的判断就会变得简单。很多事情需要亲自了解，需要比较，也需要时间。只看别人怎么评价，虽然快，却可能错过更适合自己的东西。',
+        '',
+        '所以我认为，我们既要看到认可度的作用，也要看到它的局限。认可度可以帮助人们判断，但最后还是要靠自己思考。面对大家都认可的东西，我们不能盲目跟从；面对暂时不被认可的东西，也不能轻易否定。只有这样，才能在生活中作出更适合自己的选择。'
+      ].join('\n')
+    },
+    {
+      id: 'anchor-class4-31',
+      label: '四类样本',
+      topic: recognitionTopic,
+      expectedScore: 31,
+      tolerance: 7,
+      draft: [
+        '人生需要努力。一个人只要努力，就能得到别人的认可。被认可会让人高兴，也会让人更有动力。',
+        '',
+        '从小到大，我们都希望得到老师和家长的表扬。表扬说明我们做得好，所以我们应该继续努力，争取更多人的认可。',
+        '',
+        '如果一个人不努力，就不会被别人喜欢。社会也是这样，大家都要积极向上，不能懒惰。只要坚持奋斗，就能成功。',
+        '',
+        '生活中还有很多事情都需要认可。比如一个人参加比赛，如果大家认可他，他就会更有信心；如果没有人认可，他就可能失去动力。所以我们要多鼓励别人，也要努力让别人看到自己的优点。',
+        '',
+        '当然，有时候别人不认可我们，我们也不能放弃。只要心中有目标，就应当一直坚持。因为成功往往属于努力的人，只要每天进步一点，最后就会得到回报。',
+        '',
+        '在学校里，成绩好的同学常常会得到认可，参加活动积极的同学也会得到认可。这些认可都能鼓励我们继续进步。因此，认可度可以让人看到自己的不足，也可以让人找到努力方向。',
+        '',
+        '但是，认可度有时也不一定准确。有的人努力了很久却暂时没有被看见，有的人只是表现得很热闹却容易被表扬。所以我们不能因为没有认可就否定自己，也不能因为获得认可就骄傲。',
+        '',
+        '所以，我认为认可度说明一个人是否努力，也说明社会是否公平。我们应该追求更高认可度，让自己变得更优秀。只有这样，人生才会更有意义，社会也会更加美好。'
+      ].join('\n')
+    }
+  ];
+}
+
+async function runShanghaiScoreCalibrationSuite() {
+  const samples = getShanghaiScoreCalibrationSamples();
+  const cases = [];
+  for (const sample of samples) {
+    try {
+      const report = await buildShanghaiTeacherReviewReport(sample.topic, sample.draft);
+      const predicted = Number(report.total70 || 0);
+      const error = predicted - Number(sample.expectedScore || 0);
+      const bandOk = getShanghaiBandKeyByScore(predicted) === getShanghaiBandKeyByScore(sample.expectedScore);
+      const scoreOk = Math.abs(error) <= Number(sample.tolerance || 5);
+      const boundaryOk = scoreOk && Math.abs(error) <= 6 && /临界/.test(sample.label || '');
+      cases.push({
+        id: sample.id,
+        name: sample.label,
+        ok: (bandOk && scoreOk) || boundaryOk,
+        predicted,
+        expected: sample.expectedScore,
+        tolerance: sample.tolerance,
+        error,
+        predictedBand: getShanghaiOfficialBand(predicted),
+        expectedBand: getShanghaiOfficialBand(sample.expectedScore),
+        detail: `${predicted}/70，期望${sample.expectedScore}±${sample.tolerance}；${report.officialScore?.calibrationDecision?.anchorLabel || '无锚点'}`
+      });
+    } catch (err) {
+      cases.push({
+        id: sample.id,
+        name: sample.label,
+        ok: false,
+        predicted: 0,
+        expected: sample.expectedScore,
+        tolerance: sample.tolerance,
+        error: 0,
+        predictedBand: '异常',
+        expectedBand: getShanghaiOfficialBand(sample.expectedScore),
+        detail: `异常：${err?.message || '未知错误'}`
+      });
+    }
+  }
+  const passed = cases.filter((x) => x.ok).length;
+  const meanAbsError = cases.length ? Math.round(cases.reduce((sum, item) => sum + Math.abs(Number(item.error || 0)), 0) / cases.length * 10) / 10 : 0;
+  const bias = cases.length ? Math.round(cases.reduce((sum, item) => sum + Number(item.error || 0), 0) / cases.length * 10) / 10 : 0;
+  const bandAccuracy = cases.length ? Math.round((cases.filter((x) => x.predictedBand === x.expectedBand).length / cases.length) * 100) : 0;
+  return {
+    cases,
+    passed,
+    total: cases.length,
+    meanAbsError,
+    bias,
+    bandAccuracy,
+    level: passed === cases.length ? '通过' : (passed >= cases.length - 1 ? '基本通过' : '需校准'),
+    summary: `档位准确率${bandAccuracy}%，平均误差${meanAbsError}分，整体${bias > 0 ? '偏松' : (bias < 0 ? '偏严' : '基本平衡')}${Math.abs(bias)}分。`
+  };
+}
+
 function renderBaselineCheckReport(report, container) {
   const rows = report.checks.map((c) => `
     <div class="score-row">
@@ -8182,6 +8628,18 @@ function runFeatureFlowChecks() {
 
 async function runRegressionSuite() {
   const cases = [];
+  let calibration = null;
+
+  try {
+    calibration = await runShanghaiScoreCalibrationSuite();
+    cases.push({
+      name: '上海评分校准集',
+      ok: calibration.passed >= calibration.total - 1 && calibration.meanAbsError <= 5,
+      detail: calibration.summary
+    });
+  } catch (err) {
+    cases.push({ name: '上海评分校准集', ok: false, detail: `异常：${err?.message || '未知错误'}` });
+  }
 
   try {
     const analysis = analyzeEssayTopic('一个人乐意去探索陌生世界，仅仅是因为好奇心吗？');
@@ -8431,7 +8889,8 @@ async function runRegressionSuite() {
     cases,
     passed,
     total: cases.length,
-    level: passed === cases.length ? '通过' : (passed >= cases.length - 1 ? '基本通过' : '未通过')
+    level: passed === cases.length ? '通过' : (passed >= cases.length - 1 ? '基本通过' : '未通过'),
+    calibration
   };
 }
 
@@ -8442,15 +8901,25 @@ function renderRegressionReport(report, container) {
       <p class="agent-para-issues">${escapeHtml(item.detail)}</p>
     </div>
   `).join('');
+  const calibration = report.calibration;
+  const calibrationRows = (calibration?.cases || []).map((item) => `
+    <div class="score-row">
+      <div class="score-row-top"><span>${escapeHtml(item.name)}</span><strong>${item.ok ? '命中' : '需调'}</strong></div>
+      <p>系统：${escapeHtml(String(item.predicted))}/70｜标定：${escapeHtml(String(item.expected))}/70｜误差：${item.error > 0 ? '+' : ''}${escapeHtml(String(item.error))}</p>
+      <p class="agent-para-issues">${escapeHtml(item.detail)}</p>
+    </div>
+  `).join('');
   container.innerHTML = `
     <div class="agent-result-head">
       <h3>回归测试报告</h3>
       <div class="agent-tags">
         <span class="agent-tag">结果：${escapeHtml(report.level)}</span>
         <span class="agent-tag">通过：${report.passed}/${report.total}</span>
+        ${calibration ? `<span class="agent-tag">评分校准：${escapeHtml(calibration.level)}</span>` : ''}
       </div>
     </div>
     <div class="agent-result-block"><h4>回归样例</h4><div class="score-grid">${rows}</div></div>
+    ${calibration ? `<div class="agent-result-block"><h4>评分校准锚点验收</h4><p>${escapeHtml(calibration.summary)}</p><div class="score-grid">${calibrationRows}</div><p class="agent-para-issues">这组样本是评分引擎的“秤砣”：一类、二类、三类、四类都要稳定，后续每次改评分都先看这里有没有漂移。</p></div>` : ''}
   `;
 }
 
