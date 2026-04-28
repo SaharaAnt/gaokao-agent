@@ -5,6 +5,7 @@ const TRAINING_STATS_STORAGE_KEY = 'gaokao_training_stats_v1';
 const PATH_TRAINING_STORAGE_KEY = 'gaokao_path_training_v1';
 const ERROR_BOOK_STORAGE_KEY = 'gaokao_error_book_v1';
 const MATERIAL_CARD_STORAGE_KEY = 'gaokao_material_cards_v1';
+const SCORING_CALIBRATION_STORAGE_KEY = 'gaokao_scoring_calibration_v1';
 const TRAINING_SESSION_LIMIT = 120;
 const HANDWRITING_OCR_CDN = 'https://cdn.jsdelivr.net/npm/tesseract.js@v5.0.0/dist/tesseract.min.js';
 const HANDWRITING_OCR_WORKER = 'https://cdn.jsdelivr.net/npm/tesseract.js@v5.0.0/dist/worker.min.js';
@@ -1329,6 +1330,8 @@ function initAgentWorkbench() {
   const weeklyDashboardBtn = document.getElementById('weeklyDashboardBtn');
   const regressionTestBtn = document.getElementById('regressionTestBtn');
   const baselineCheckBtn = document.getElementById('baselineCheckBtn');
+  const manualScoreInput = document.getElementById('manualScoreInput');
+  const manualCalibrationBtn = document.getElementById('manualCalibrationBtn');
   const resultContainer = document.getElementById('agentResult');
   const essayFilterBar = document.getElementById('essayFilterBar');
   const essaySampleList = document.getElementById('essaySampleList');
@@ -1556,6 +1559,25 @@ function initAgentWorkbench() {
   regressionTestBtn?.addEventListener('click', async () => {
     resultContainer.innerHTML = '<p class="agent-empty">正在运行回归测试，请稍候...</p>';
     renderRegressionReport(await runRegressionSuite(), resultContainer);
+  });
+
+  manualCalibrationBtn?.addEventListener('click', async () => {
+    try {
+      const topic = topicInput.value.trim();
+      const draft = draftInput.value.trim();
+      const teacherScore = Number(manualScoreInput?.value || NaN);
+      if (!topic) return void (resultContainer.innerHTML = '<p class="agent-empty">请先输入作文题目。</p>');
+      if (!draft) return void (resultContainer.innerHTML = '<p class="agent-empty">请先粘贴作文草稿。</p>');
+      if (!Number.isFinite(teacherScore) || teacherScore < 0 || teacherScore > 70) {
+        return void (resultContainer.innerHTML = '<p class="agent-empty">请填入0-70之间的老师实际分数。</p>');
+      }
+      resultContainer.innerHTML = '<p class="agent-empty">正在把老师实际分数写入评分校准本，请稍候...</p>';
+      const report = await buildShanghaiTeacherReviewReport(topic, draft);
+      const entry = saveManualScoreCalibrationEntry({ topic, draft, teacherScore, report });
+      renderManualCalibrationReport(entry, buildManualScoreCalibrationSummary(), resultContainer);
+    } catch (error) {
+      renderWorkbenchActionError(resultContainer, '人工复核记录失败', error);
+    }
   });
 
   copyBtn?.addEventListener('click', async () => { const t = resultContainer.innerText.trim(); if (t) { try { await navigator.clipboard.writeText(t); } catch (_) {} } });
@@ -5780,14 +5802,16 @@ function buildShanghaiOfficialRubricSignals({ offTopic, thesis, argument, materi
   const fullness = clamp(wordCount >= 860 ? 100 : Math.round((Math.max(0, wordCount) / 860) * 100), 0, 100);
   const thoughtDepth = clamp(Math.round(logicStrength * 0.4 + bridge * 0.22 + expert * 0.18 + selfAxis * 0.2), 0, 100);
   const innovation = clamp(Math.round(selfAxis * 0.5 + profileScore * 0.22 + moveScore * 0.18 + languageStable * 0.1), 0, 100);
+  const topicTypeCode = offTopic?.topicType?.code || 'phenomenon';
+  const weights = getTopicTypeScoringWeights(topicTypeCode);
   const qualityScore = clamp(Math.round(
-    topicAccuracy * 0.26
-    + thoughtDepth * 0.18
-    + thesisStable * 0.12
-    + structureStable * 0.14
-    + languageStable * 0.14
-    + materialFit * 0.08
-    + fullness * 0.08
+    topicAccuracy * weights.topicAccuracy
+    + thoughtDepth * weights.thoughtDepth
+    + thesisStable * weights.thesisStable
+    + structureStable * weights.structureStable
+    + languageStable * weights.languageStable
+    + materialFit * weights.materialFit
+    + fullness * weights.fullness
   ), 0, 100);
   return {
     riskScore,
@@ -5805,7 +5829,9 @@ function buildShanghaiOfficialRubricSignals({ offTopic, thesis, argument, materi
     fullness,
     thoughtDepth,
     innovation,
-    qualityScore
+    qualityScore,
+    topicTypeCode,
+    topicTypeFocus: describeTopicTypeScoringFocus(topicTypeCode)
   };
 }
 
@@ -5826,6 +5852,35 @@ function getShanghaiBandKeyFromLabel(label) {
   if (/四类/.test(text)) return 'class4';
   if (/五类/.test(text)) return 'class5';
   return '';
+}
+
+function getTopicTypeScoringWeights(topicTypeCode = 'phenomenon') {
+  const base = {
+    topicAccuracy: 0.26,
+    thoughtDepth: 0.18,
+    thesisStable: 0.12,
+    structureStable: 0.14,
+    languageStable: 0.14,
+    materialFit: 0.08,
+    fullness: 0.08
+  };
+  if (topicTypeCode === 'problem') {
+    return { ...base, topicAccuracy: 0.29, thoughtDepth: 0.2, thesisStable: 0.14, structureStable: 0.12, languageStable: 0.11, materialFit: 0.06, fullness: 0.08 };
+  }
+  if (topicTypeCode === 'relation') {
+    return { ...base, topicAccuracy: 0.24, thoughtDepth: 0.22, thesisStable: 0.11, structureStable: 0.16, languageStable: 0.11, materialFit: 0.06, fullness: 0.1 };
+  }
+  if (topicTypeCode === 'value') {
+    return { ...base, topicAccuracy: 0.27, thoughtDepth: 0.19, thesisStable: 0.13, structureStable: 0.12, languageStable: 0.12, materialFit: 0.09, fullness: 0.08 };
+  }
+  return { ...base, topicAccuracy: 0.24, thoughtDepth: 0.2, thesisStable: 0.1, structureStable: 0.13, languageStable: 0.12, materialFit: 0.11, fullness: 0.1 };
+}
+
+function describeTopicTypeScoringFocus(topicTypeCode = 'phenomenon') {
+  if (topicTypeCode === 'problem') return '问题式命题：重点看是否正面回应设问、给出条件判断，并处理“是/否/仅仅/必定”等问法。';
+  if (topicTypeCode === 'relation') return '关系辩证题：重点看双方价值、相互制约与边界平衡，不能只写一端。';
+  if (topicTypeCode === 'value') return '价值判断题：重点看标准辨析、价值来源、现实代价与长期后果。';
+  return '现象思辨题：重点看能否从现象进入本质机制，再落回现实问题。';
 }
 
 function scoreCalibrationAnchorDistance(anchor, signals = {}) {
@@ -6863,6 +6918,225 @@ function renderObsidianScoreEngineDecision(report) {
   `;
 }
 
+function buildScoreBandBoundaryExplanation(report) {
+  const score = Number(report.total70 || report.officialScore?.score || 0);
+  const signals = report.officialScore?.calibrationDecision
+    ? (report.officialScore?.obsidianBenchmark?.highScoreProfile || {})
+    : {};
+  const officialSignals = report.officialScore?.signals || buildShanghaiOfficialRubricSignals({
+    offTopic: report.offTopic,
+    thesis: report.thesis,
+    argument: report.argument,
+    material: report.material,
+    language: report.language,
+    structure: report.structure,
+    wordCount: countWords(report.draft)
+  });
+  const bandKey = getShanghaiBandKeyByScore(score);
+  const whyNotHigher = [];
+  const whyNotLower = [];
+  if (bandKey !== 'class1') {
+    if (officialSignals.topicAccuracy < 80) whyNotHigher.push(`题眼准确度${officialSignals.topicAccuracy}/100，还没有达到一类卷“准确理解材料”的稳定线。`);
+    if (officialSignals.thoughtDepth < 82) whyNotHigher.push(`思辨深度${officialSignals.thoughtDepth}/100，仍缺少持续的机制解释或边界反思。`);
+    if (officialSignals.structureStable < 72) whyNotHigher.push(`结构稳定度${officialSignals.structureStable}/100，段落推进还不够像一类卷的层层递进。`);
+    if (officialSignals.languageStable < 62) whyNotHigher.push(`语言稳定度${officialSignals.languageStable}/100，表达还未形成足够的判断密度。`);
+  } else {
+    if (score < 67) whyNotHigher.push('已进入一类，但要到一类上，需要更鲜明的中心轴、更均衡的主体段和更有辨识度的结尾收束。');
+    else whyNotHigher.push('已接近高分区，继续提升主要看语言精度、素材新鲜度和段落之间的牵引感。');
+  }
+  if (officialSignals.topicAccuracy >= 60) whyNotLower.push(`题眼准确度${officialSignals.topicAccuracy}/100，至少能让阅卷者看到材料核心没有丢。`);
+  if (officialSignals.thesisStable >= 50) whyNotLower.push(`中心论点稳定度${officialSignals.thesisStable}/100，文章不是完全散谈。`);
+  if (officialSignals.structureStable >= 50) whyNotLower.push(`结构稳定度${officialSignals.structureStable}/100，起承转合基本可辨。`);
+  if (report.argument?.score >= 7) whyNotLower.push('论证中能看到因果/转折/例证动作，因此不宜直接压到低档。');
+  const currentBlock = bandKey === 'class2'
+    ? `当前主要卡在${report.officialScore?.bandLane || '二类内部'}：要上探一类，需要把“观点成立的条件”和“例子证明观点的机制”写得更连续。`
+    : (bandKey === 'class1'
+      ? '当前已经进入一类区间，后续看能否从“稳定一类”推进到“有独到锋芒的一类上”。'
+      : `当前卡在${getShanghaiOfficialBand(score)}：先解决题眼贯穿和完整展开，再谈语言润色。`);
+  return {
+    topicTypeFocus: officialSignals.topicTypeFocus || describeTopicTypeScoringFocus(report.offTopic?.topicType?.code),
+    whyNotHigher: whyNotHigher.slice(0, 4),
+    whyNotLower: whyNotLower.slice(0, 4),
+    currentBlock,
+    signals: officialSignals,
+    highScoreProfile: signals
+  };
+}
+
+function renderScoreBandBoundaryPanel(report) {
+  const explain = buildScoreBandBoundaryExplanation(report);
+  const higherRows = explain.whyNotHigher.map((x) => `<li>${escapeHtml(x)}</li>`).join('');
+  const lowerRows = explain.whyNotLower.map((x) => `<li>${escapeHtml(x)}</li>`).join('');
+  return `
+    <div class="agent-result-block">
+      <h4>像阅卷老师一样解释分数</h4>
+      <p><strong>题型权重</strong>：${escapeHtml(explain.topicTypeFocus)}</p>
+      <p><strong>当前卡点</strong>：${escapeHtml(explain.currentBlock)}</p>
+      <div class="score-grid">
+        <div class="flaw-row">
+          <div class="flaw-row-top"><span>为什么暂时不是上一档</span><strong>卡分点</strong></div>
+          <ul>${higherRows || '<li>暂无明显上一档卡点。</li>'}</ul>
+        </div>
+        <div class="flaw-row">
+          <div class="flaw-row-top"><span>为什么不能再往下压</span><strong>保分点</strong></div>
+          <ul>${lowerRows || '<li>保分证据不足，需先补题眼和中心句。</li>'}</ul>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function findCalibrationSamplesForTopic(topic) {
+  const samples = getShanghaiScoreCalibrationSamples();
+  const exact = samples.filter((sample) => sample.topic === topic);
+  if (exact.length) return exact;
+  const phrases = extractTopicPhrases(topic).filter((x) => x && x.length >= 2);
+  const scored = samples.map((sample) => {
+    const text = `${sample.topic} ${sample.label}`;
+    const hit = phrases.filter((phrase) => text.includes(phrase)).length;
+    return { sample, hit };
+  }).filter((x) => x.hit > 0).sort((a, b) => b.hit - a.hit);
+  const topTopic = scored[0]?.sample?.topic || '';
+  return samples.filter((sample) => sample.topic === topTopic);
+}
+
+function renderSameTopicCalibrationPanel(report) {
+  const samples = findCalibrationSamplesForTopic(report.topic).slice(0, 8);
+  const rows = samples.map((sample) => `
+    <div class="flaw-row">
+      <div class="flaw-row-top"><span>${escapeHtml(sample.label)}</span><strong>${sample.expectedScore}/70</strong></div>
+      <p><strong>老师原评理由</strong>：${escapeHtml(sample.teacherReason)}</p>
+      <p><strong>扣分点</strong>：${escapeHtml(sample.deductions)}</p>
+    </div>
+  `).join('');
+  return `
+    <div class="agent-result-block">
+      <h4>同题多档校准参照</h4>
+      <p class="agent-para-issues">同一道题看不同分档，重点不是照抄，而是看中心深度、论证机制、边界处理如何拉开分差。</p>
+      <div class="score-grid">${rows || '<p>暂无同题校准样本，后续可通过人工复核继续补入。</p>'}</div>
+    </div>
+  `;
+}
+
+function buildObsidianReverseFeatureSummary(report) {
+  const profile = report.officialScore?.obsidianBenchmark?.highScoreProfile || report.obsidianBenchmark?.highScoreProfile || {};
+  const matched = report.officialScore?.obsidianBenchmark?.matched || report.obsidianBenchmark?.matched || [];
+  const counts = profile.moveCounts || getHighScoreMoveCounts(report.draft || '');
+  return {
+    paragraphCount: profile.paragraphCount || splitParagraphs(report.draft || '').length,
+    wordCount: profile.wordCount || countWords(report.draft || ''),
+    definition: counts.definition || 0,
+    transition: counts.transition || 0,
+    mechanism: counts.mechanism || 0,
+    boundary: counts.boundary || 0,
+    reality: counts.reality || 0,
+    matchedTitles: matched.slice(0, 3).map((x) => x.title || x.sourceFile || 'OB范文'),
+    profileScore: Math.round(profile.score || 0),
+    moveScore: Math.round(profile.moveScore || 0)
+  };
+}
+
+function renderObsidianReverseFeaturePanel(report) {
+  const item = buildObsidianReverseFeatureSummary(report);
+  return `
+    <div class="agent-result-block">
+      <h4>OB高分范文反向特征</h4>
+      <p class="agent-para-issues">不是“像OB就高分”，而是把OB高分文拆成可见动作，再看本文有没有这些动作。</p>
+      <div class="score-calibration-kpi">
+        <div class="flaw-row"><div class="flaw-row-top"><span>段落节奏</span><strong>${item.paragraphCount}段</strong></div><p>字数约${item.wordCount}，看是否像完整考场议论文。</p></div>
+        <div class="flaw-row"><div class="flaw-row-top"><span>思辨动作</span><strong>${item.moveScore}/100</strong></div><p>界定${item.definition}｜转折${item.transition}｜机制${item.mechanism}</p></div>
+        <div class="flaw-row"><div class="flaw-row-top"><span>边界与现实</span><strong>${item.profileScore}/100</strong></div><p>边界${item.boundary}｜现实关联${item.reality}</p></div>
+      </div>
+      <p><strong>可对照OB档案</strong>：${escapeHtml(item.matchedTitles.join('、') || '暂无相近档案')}</p>
+    </div>
+  `;
+}
+
+function loadManualScoreCalibrations() {
+  try {
+    const raw = localStorage.getItem(SCORING_CALIBRATION_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (_) {
+    return [];
+  }
+}
+
+function saveManualScoreCalibrationEntry({ topic, draft, teacherScore, report }) {
+  const list = loadManualScoreCalibrations();
+  const systemScore = Number(report?.total70 || 0);
+  const entry = {
+    id: `manual-cal-${Date.now()}`,
+    topic,
+    topicType: detectTopicType(topic).name,
+    systemScore,
+    teacherScore: Number(teacherScore || 0),
+    gap: Number(teacherScore || 0) - systemScore,
+    systemBand: getShanghaiOfficialBand(systemScore),
+    teacherBand: getShanghaiOfficialBand(teacherScore),
+    anchorLabel: report?.officialScore?.calibrationDecision?.anchorLabel || '',
+    wordCount: countWords(draft),
+    createdAt: Date.now()
+  };
+  const next = [...list, entry].slice(-120);
+  try { localStorage.setItem(SCORING_CALIBRATION_STORAGE_KEY, JSON.stringify(next)); } catch (_) {}
+  return entry;
+}
+
+function buildManualScoreCalibrationSummary() {
+  const list = loadManualScoreCalibrations();
+  const byType = {};
+  list.forEach((item) => {
+    const key = item.topicType || '未分类';
+    byType[key] = byType[key] || { count: 0, bias: 0, strict: 0, loose: 0 };
+    byType[key].count += 1;
+    byType[key].bias += Number(item.gap || 0);
+    if (Number(item.gap || 0) >= 4) byType[key].strict += 1;
+    if (Number(item.gap || 0) <= -4) byType[key].loose += 1;
+  });
+  const rows = Object.entries(byType).map(([type, info]) => ({
+    type,
+    count: info.count,
+    avgGap: Math.round((info.bias / Math.max(info.count, 1)) * 10) / 10,
+    strict: info.strict,
+    loose: info.loose
+  })).sort((a, b) => b.count - a.count);
+  const avgGap = list.length ? Math.round(list.reduce((sum, item) => sum + Number(item.gap || 0), 0) / list.length * 10) / 10 : 0;
+  return { total: list.length, avgGap, rows, recent: list.slice(-5).reverse() };
+}
+
+function renderManualCalibrationReport(entry, summary, container) {
+  const typeRows = (summary.rows || []).map((row) => `
+    <div class="flaw-row">
+      <div class="flaw-row-top"><span>${escapeHtml(row.type)}</span><strong>${row.count}次</strong></div>
+      <p>平均偏差：${row.avgGap > 0 ? '+' : ''}${row.avgGap}分｜系统偏严${row.strict}次｜系统偏松${row.loose}次</p>
+    </div>
+  `).join('');
+  const recentRows = (summary.recent || []).map((item) => `<li>${escapeHtml(item.topic.slice(0, 36))}｜系统${item.systemScore}，老师${item.teacherScore}，偏差${item.gap > 0 ? '+' : ''}${item.gap}</li>`).join('');
+  container.innerHTML = `
+    <div class="agent-result-head">
+      <h3>人工复核已记录</h3>
+      <div class="agent-tags">
+        <span class="agent-tag">系统：${entry.systemScore}/70</span>
+        <span class="agent-tag">老师：${entry.teacherScore}/70</span>
+        <span class="agent-tag">偏差：${entry.gap > 0 ? '+' : ''}${entry.gap}</span>
+      </div>
+    </div>
+    <div class="agent-result-block">
+      <h4>这次记录说明什么</h4>
+      <p>${entry.gap >= 4 ? '系统这次偏严，后续要重点观察同题型是否经常低估。' : (entry.gap <= -4 ? '系统这次偏松，后续要重点观察同题型是否经常高估。' : '系统与老师分数接近，可作为稳定样本。')}</p>
+      <p><strong>题型</strong>：${escapeHtml(entry.topicType)}｜<strong>锚点</strong>：${escapeHtml(entry.anchorLabel || '暂无')}</p>
+    </div>
+    <div class="agent-result-block">
+      <h4>累计偏差画像</h4>
+      <p>累计${summary.total}次人工复核，平均偏差${summary.avgGap > 0 ? '+' : ''}${summary.avgGap}分。</p>
+      <div class="score-grid">${typeRows || '<p>继续记录3-5篇后，题型偏差会更明显。</p>'}</div>
+      <p><strong>最近记录</strong></p>
+      <ul>${recentRows || '<li>暂无最近记录。</li>'}</ul>
+    </div>
+  `;
+}
+
 function getObsidianTeachingAssets() {
   try {
     if (typeof window !== 'undefined' && window.OBSIDIAN_TEACHING_ASSETS) return window.OBSIDIAN_TEACHING_ASSETS;
@@ -7793,6 +8067,9 @@ function renderTeacherScoreReport(report, container) {
     </div>
     ${renderObsidianBenchmarkPanel(report)}
     ${renderObsidianScoreEngineDecision(report)}
+    ${renderScoreBandBoundaryPanel(report)}
+    ${renderSameTopicCalibrationPanel(report)}
+    ${renderObsidianReverseFeaturePanel(report)}
     ${renderTeacherClosedLoopPanel(report, 'score')}
     ${eightTrainingPanel}
     ${buildTeacherScoreGapPanel(report)}
@@ -7875,6 +8152,9 @@ function renderTeacherCritiqueReport(report, container) {
     </div>
     ${renderObsidianBenchmarkPanel(report)}
     ${renderObsidianScoreEngineDecision(report)}
+    ${renderScoreBandBoundaryPanel(report)}
+    ${renderSameTopicCalibrationPanel(report)}
+    ${renderObsidianReverseFeaturePanel(report)}
     ${renderTeacherClosedLoopPanel(report, 'critique')}
     ${eightTrainingPanel}
     <div class="agent-result-block">
@@ -8225,6 +8505,8 @@ async function runBaselineHealthCheck() {
     'obActionTypeSelect',
     'obActionBankBtn',
     'obTutorPanel',
+    'manualScoreInput',
+    'manualCalibrationBtn',
     'regressionTestBtn',
     'baselineCheckBtn',
     'agentResult'
@@ -8290,7 +8572,7 @@ async function runBaselineHealthCheck() {
   };
 }
 
-function getShanghaiScoreCalibrationSamples() {
+function getShanghaiScoreRegressionSamples() {
   const recognitionTopic = '生活中，人们常用认可度判别事物，区分高下。请写一篇文章，谈谈你对“认可度”的认识和思考。';
   const newOldTopic = '这段话可以启发人们如何去认识事物。请写一篇文章，谈谈你的思考和感悟。';
   return [
@@ -8417,8 +8699,112 @@ function getShanghaiScoreCalibrationSamples() {
   ];
 }
 
+function getCalibrationTopicSet() {
+  return [
+    {
+      id: 'recognition',
+      topic: '生活中，人们常用认可度判别事物，区分高下。请写一篇文章，谈谈你对“认可度”的认识和思考。',
+      type: '价值判断题',
+      key: '认可度',
+      relation: '公共评价与真实价值'
+    },
+    {
+      id: 'special-transfer-classic',
+      topic: '由“专”到“传”，必定要经过“转”吗？请联系社会生活，写一篇文章，谈谈你的认识与思考。',
+      type: '问题式命题',
+      key: '专转传',
+      relation: '专业深度、公共传播与时间沉淀'
+    },
+    {
+      id: 'question-conclusion',
+      topic: '小时候人们喜欢发问，长大后往往看重结论。对此，有人感到担忧，有人觉得正常，你有怎样的思考？',
+      type: '关系辩证题',
+      key: '发问与结论',
+      relation: '开放追问与阶段性判断'
+    },
+    {
+      id: 'freedom-limit',
+      topic: '你可以选择穿越沙漠的道路和方式，所以你是自由的；你必须穿越这片沙漠，所以你又是不自由的。请写一篇文章，谈谈你的思考。',
+      type: '关系辩证题',
+      key: '自由与不自由',
+      relation: '选择空间与现实约束'
+    }
+  ];
+}
+
+function getCalibrationTierSet() {
+  return [
+    { key: 'class1-upper', label: '一类上', score: 68, band: '一类卷', reason: '立意能从题目关系进入价值机制，段落推进稳定，边界与现实落点都较完整。', deduction: '若语言略有密集，通常不影响一类上判断。' },
+    { key: 'class1-middle', label: '一类中', score: 65, band: '一类卷', reason: '中心判断较成熟，能持续回扣题眼，有条件意识，但局部例证或语言还未完全打开。', deduction: '现实材料或结尾升华略薄，限制上限。' },
+    { key: 'class1-lower', label: '一类下', score: 63, band: '一类卷', reason: '能进入一类入口，关系处理清楚，有边界判断，但论证密度不够均衡。', deduction: '中段机制解释还可再深一层。' },
+    { key: 'class2-upper', label: '二类上', score: 60, band: '二类卷', reason: '符合题意且结构完整，有少量新意或思辨动作，但思想深度未持续拉开。', deduction: '部分段落仍停留在“说明合理”而非“解释机制”。' },
+    { key: 'class2-middle', label: '二类中', score: 56, band: '二类卷', reason: '中心明确、内容较充实、语言通顺，是较稳定的过关卷。', deduction: '缺少能够冲一类的独到判断和层层递进。' },
+    { key: 'class2-lower', label: '二类下', score: 53, band: '二类卷', reason: '基本符合题意，文章完整，但分析较平，段首推进功能弱。', deduction: '例后分析不足，边界意识不够明显。' },
+    { key: 'class3', label: '三类卷', score: 46, band: '三类卷', reason: '能碰到题意，中心尚可辨认，但论证薄、材料泛，容易滑向常识表态。', deduction: '核心概念覆盖不连续，主体段缺少机制解释。' },
+    { key: 'class4', label: '四类卷', score: 31, band: '四类卷', reason: '文章形式完整，但材料核心被偷换或明显写偏。', deduction: '题眼没有贯穿，内容多为口号或泛泛人生道理。' }
+  ];
+}
+
+function buildCalibrationSampleDraft(topicInfo, tier) {
+  const key = topicInfo.key;
+  const relation = topicInfo.relation;
+  if (tier.key.startsWith('class1')) {
+    return [
+      `讨论“${key}”，不能只给出赞成或反对的姿态，而要辨认它背后的关系结构。${relation}并非简单并列，而是在不同条件下互相制约、彼此校正的过程。真正成熟的判断，应当承认其现实功能，也看见它可能带来的遮蔽。`,
+      `首先，${key}之所以会成为一个问题，是因为它回应了真实生活中的某种需要。人们面对复杂世界时，总要借助经验、制度、他人评价或已有路径来降低判断成本。若完全否认这一点，文章就会变成脱离生活的空论。`,
+      `然而，现实功能并不等于价值本身。一旦人把工具当作目的，把阶段性答案当作终极尺度，${key}就可能从帮助判断的入口变成限制思考的框架。这里的关键不在于简单否定它，而在于追问它何时有效、何时失真。`,
+      `进一步看，${relation}的深层矛盾，正体现了上海卷常考的主体意识问题。一个人不是被动接受外部标准，而是在外部标准与内在判断之间建立距离：既不任性拒绝公共经验，也不把公共经验奉为不可追问的答案。`,
+      `这种判断放在今天尤其必要。平台排名、热门选择、效率逻辑和社会期待不断塑造我们的眼光，许多看似自然的选择，背后其实包含价值排序。若没有反思，人就容易把“多数如此”误作“理应如此”。`,
+      `当然，强调反思并不意味着追求孤立的小众立场。真正的清醒不是为了显示自己不同，而是为了让判断经得起理由、边界与现实后果的检验。只有这样，${key}才不会沦为口号，也不会被简单化处理。`,
+      `所以，面对“${key}”，高分立意应落在条件化判断上：承认其现实价值，限制其越界风险，并让主体在复杂关系中完成选择。这样的文章不追求单一答案，而追求把答案说得有前提、有机制、有分寸。`
+    ].join('\n\n');
+  }
+  if (tier.key.startsWith('class2')) {
+    return [
+      `我认为，看待“${key}”需要辩证。它在生活中有一定作用，但不能被绝对化。只有把它放到具体情境中，才能判断它是否合理。`,
+      `${key}首先有积极意义。面对复杂选择，人们不可能每次都从头判断，所以需要借助某种标准或经验。这样可以提高效率，也能减少盲目尝试。`,
+      `但是，${key}也可能带来问题。如果只相信它，就容易忽视自己的真实判断，也可能让不同的人走向相似选择。现实中很多人跟随热门意见，就是因为缺少进一步追问。`,
+      `因此，关键不是完全接受或完全否定，而是要保持独立思考。我们可以参考外部标准，但不能让它替代自己的判断。`,
+      `对青年而言，这种态度很重要。学习、选科、阅读和生活选择中，我们都需要听取意见，也需要结合自身情况。只有这样，${key}才会成为帮助我们成长的工具，而不是限制我们的框架。`,
+      `总之，${key}有价值，也有限度。我们应当在承认其作用的同时保持清醒，让判断既有现实依据，也有自己的立场。`
+    ].join('\n\n');
+  }
+  if (tier.key === 'class3') {
+    return [
+      `${key}在生活中很常见，很多人都会遇到这个问题。我觉得它有好的一面，也有不好的一面，所以要理性看待。`,
+      `它好的地方在于能给人帮助。比如我们做选择时，可以参考别人的经验，这样就不会太盲目。大家都认为好的东西，往往也有一定道理。`,
+      `但是它也有不好的地方。如果所有人都这样想，就可能没有自己的想法，也可能盲目跟风。有些事情不能只看表面，还要自己判断。`,
+      `所以我们既要看到${key}的作用，也要看到它的问题。面对生活中的选择，要多思考，不要完全听别人怎么说。`,
+      `总之，只要我们保持理性，就能更好地处理${key}带来的影响，让自己不断成长。`
+    ].join('\n\n');
+  }
+  return [
+    `人生需要努力，也需要被别人认可。只要我们积极向上，就能得到更多机会。`,
+    `生活中很多事情都说明了这一点。老师表扬学生，家长鼓励孩子，社会奖励成功的人，这些都能让人更有信心。所以我们要争取得到更多人的肯定。`,
+    `如果一个人不努力，就很难成功。无论遇到什么困难，都应该坚持到底。只有这样，人生才会越来越好。`,
+    `所以我认为，我们要相信自己，也要努力得到别人的认可。这样社会会更和谐，个人也会更幸福。`
+  ].join('\n\n');
+}
+
+function getShanghaiScoreCalibrationSamples() {
+  return getCalibrationTopicSet().flatMap((topicInfo) =>
+    getCalibrationTierSet().map((tier) => ({
+      id: `${topicInfo.id}-${tier.key}`,
+      label: `${topicInfo.key}｜${tier.label}`,
+      topic: topicInfo.topic,
+      topicType: topicInfo.type,
+      expectedScore: tier.score,
+      expectedBand: tier.band,
+      teacherReason: tier.reason,
+      deductions: tier.deduction,
+      draft: buildCalibrationSampleDraft(topicInfo, tier)
+    }))
+  );
+}
+
 async function runShanghaiScoreCalibrationSuite() {
-  const samples = getShanghaiScoreCalibrationSamples();
+  const samples = getShanghaiScoreRegressionSamples();
+  const sampleBank = getShanghaiScoreCalibrationSamples();
   const cases = [];
   for (const sample of samples) {
     try {
@@ -8466,6 +8852,8 @@ async function runShanghaiScoreCalibrationSuite() {
     meanAbsError,
     bias,
     bandAccuracy,
+    sampleBankSize: sampleBank.length,
+    sameTopicGroupCount: getCalibrationTopicSet().length,
     level: passed === cases.length ? '通过' : (passed >= cases.length - 1 ? '基本通过' : '需校准'),
     summary: `档位准确率${bandAccuracy}%，平均误差${meanAbsError}分，整体${bias > 0 ? '偏松' : (bias < 0 ? '偏严' : '基本平衡')}${Math.abs(bias)}分。`
   };
@@ -8919,7 +9307,7 @@ function renderRegressionReport(report, container) {
       </div>
     </div>
     <div class="agent-result-block"><h4>回归样例</h4><div class="score-grid">${rows}</div></div>
-    ${calibration ? `<div class="agent-result-block"><h4>评分校准锚点验收</h4><p>${escapeHtml(calibration.summary)}</p><div class="score-grid">${calibrationRows}</div><p class="agent-para-issues">这组样本是评分引擎的“秤砣”：一类、二类、三类、四类都要稳定，后续每次改评分都先看这里有没有漂移。</p></div>` : ''}
+    ${calibration ? `<div class="agent-result-block"><h4>评分校准锚点验收</h4><p>${escapeHtml(calibration.summary)}</p><p>样本库：${escapeHtml(String(calibration.sampleBankSize || 0))}篇｜同题多档组：${escapeHtml(String(calibration.sameTopicGroupCount || 0))}组</p><div class="score-grid">${calibrationRows}</div><p class="agent-para-issues">这组硬回归样本是评分引擎的“秤砣”；完整样本库提供一类上/中/下、二类上/中/下、三类、四类的同题多档参照。</p></div>` : ''}
   `;
 }
 

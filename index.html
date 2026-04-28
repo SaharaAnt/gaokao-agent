@@ -123,6 +123,11 @@
           <button id="regressionTestBtn" class="agent-btn ghost">回归测试</button>
           <button id="baselineCheckBtn" class="agent-btn ghost">基础自检</button>
         </div>
+        <div class="manual-calibration-panel">
+          <label for="manualScoreInput">老师实际分数（可选，用于校准评分秤）</label>
+          <input id="manualScoreInput" class="manual-score-input" type="number" min="0" max="70" step="1" placeholder="例如 58" />
+          <button id="manualCalibrationBtn" class="agent-btn ghost" type="button">记录人工复核</button>
+        </div>
       </details>
 
       <details class="workspace-step library-step" id="libraryWorkbenchStep">
@@ -230,6 +235,6 @@
     <script src="data.js?v=72"></script>
     <script src="obsidian_index.js?v=2"></script>
     <script src="obsidian_teaching_assets.js?v=2"></script>
-    <script src="app.js?v=77"></script>
+    <script src="app.js?v=78"></script>
 </body>
 </html>

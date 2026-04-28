@@ -839,6 +839,40 @@ body {
 }
 .freq-dot.active { background: #9f7d51; }
 
+.manual-calibration-panel {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: 12px 24px 20px;
+  padding: 12px;
+  border: 1px dashed rgba(138, 106, 66, 0.28);
+  border-radius: 18px;
+  background: rgba(255, 253, 247, 0.64);
+}
+.manual-calibration-panel label {
+  color: var(--muted);
+  font-size: 14px;
+}
+.manual-score-input {
+  width: 118px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 10px 12px;
+  background: rgba(255, 253, 247, 0.9);
+  color: var(--text);
+  font: inherit;
+}
+.score-calibration-kpi {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+}
+.score-calibration-kpi .flaw-row {
+  margin: 0;
+}
+
 .timeline-section {
   padding-bottom: 80px;
 }
