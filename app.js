@@ -1350,6 +1350,9 @@ function initAgentWorkbench() {
   const obKnowledgeSearchInput = document.getElementById('obKnowledgeSearchInput');
   const obKnowledgeFolderSelect = document.getElementById('obKnowledgeFolderSelect');
   const obKnowledgeTypeSelect = document.getElementById('obKnowledgeTypeSelect');
+  const obKnowledgeThemeSelect = document.getElementById('obKnowledgeThemeSelect');
+  const obKnowledgeScoreSelect = document.getElementById('obKnowledgeScoreSelect');
+  const obKnowledgePurposeSelect = document.getElementById('obKnowledgePurposeSelect');
   const obKnowledgeSearchBtn = document.getElementById('obKnowledgeSearchBtn');
   const obKnowledgeResetBtn = document.getElementById('obKnowledgeResetBtn');
   const obKnowledgePanel = document.getElementById('obKnowledgePanel');
@@ -1378,6 +1381,9 @@ function initAgentWorkbench() {
     searchInput: obKnowledgeSearchInput,
     folderSelect: obKnowledgeFolderSelect,
     typeSelect: obKnowledgeTypeSelect,
+    themeSelect: obKnowledgeThemeSelect,
+    scoreSelect: obKnowledgeScoreSelect,
+    purposeSelect: obKnowledgePurposeSelect,
     searchBtn: obKnowledgeSearchBtn,
     resetBtn: obKnowledgeResetBtn,
     panel: obKnowledgePanel,
@@ -6528,7 +6534,7 @@ function normalizeObsidianTopicTypeName(name) {
   if (/价值|判断|认可|意义/.test(text)) return '价值判断题';
   if (/话题/.test(text)) return '话题作文';
   if (/材料|主题|路径|方法/.test(text)) return '材料作文';
-  if (/现象|思辨/.test(text)) return '';
+  if (/现象|思辨/.test(text)) return '现象思辨题';
   return text || '未分类';
 }
 
@@ -7242,6 +7248,8 @@ function buildObsidianKnowledgeSearchText(entry) {
     entry?.docRole,
     entry?.topicType,
     entry?.themeTag,
+    entry?.scoreBand?.label,
+    entry?.scoreBand?.score,
     entry?.topicKey,
     entry?.preview,
     ...(entry?.anchorTerms || []),
@@ -7250,34 +7258,77 @@ function buildObsidianKnowledgeSearchText(entry) {
   ].filter(Boolean).join(' '));
 }
 
+function getObsidianEntryTheme(entry) {
+  return String(entry?.themeTag || inferObsidianThemeTag(`${entry?.topicKey || ''} ${entry?.title || ''}`, entry?.preview || '') || '未标注母题').trim() || '未标注母题';
+}
+
+function getObsidianEntryScoreTier(entry) {
+  const label = String(entry?.scoreBand?.label || '').trim();
+  const score = Number(entry?.scoreBand?.score);
+  if (entry?.scoreBand?.isHighScore || /高分|一类上|一类/.test(label) || score >= 63) return '一类/高分标杆';
+  if (/二类/.test(label) || (score >= 52 && score <= 62)) return '二类样本';
+  if (/三类/.test(label) || (score >= 39 && score <= 51)) return '三类样本';
+  if (/四类/.test(label) || (score >= 21 && score <= 38)) return '四类样本';
+  if (score > 0 && score < 21) return '五类/低分样本';
+  return '未标分';
+}
+
+function getObsidianEntryPurposeList(entry) {
+  const role = String(entry?.docRole || '');
+  const uses = Array.isArray(entry?.trainingUses) ? entry.trainingUses.filter(Boolean) : [];
+  const inferred = [];
+  if (/题|命题|评析|解读|回顾/.test(role)) inferred.push('分析题目');
+  if (/评分|标准|样卷|评述/.test(role)) inferred.push('草稿评分');
+  if (/方法|议论文|写作/.test(role)) inferred.push('方法训练');
+  if (/范文|佳作|高分|下水/.test(role) || entry?.scoreBand?.isHighScore) inferred.push('范文生成');
+  if (/批改|问题|任务/.test(role)) inferred.push('习作精批');
+  return dedupeArray([...uses, ...inferred]).filter(Boolean);
+}
+
 function getObsidianKnowledgeFilters() {
   const entries = getObsidianKnowledgeEntries();
   const folders = dedupeArray(entries.map(getObsidianEntryFolder)).sort((a, b) => a.localeCompare(b, 'zh-Hans-CN'));
   const types = dedupeArray(entries.map((entry) => entry.topicType || '未分类')).sort((a, b) => a.localeCompare(b, 'zh-Hans-CN'));
-  return { folders, types };
+  const themes = dedupeArray(entries.map(getObsidianEntryTheme)).sort((a, b) => a.localeCompare(b, 'zh-Hans-CN'));
+  const scoreOrder = ['一类/高分标杆', '二类样本', '三类样本', '四类样本', '五类/低分样本', '未标分'];
+  const scores = dedupeArray(entries.map(getObsidianEntryScoreTier))
+    .sort((a, b) => {
+      const ai = scoreOrder.includes(a) ? scoreOrder.indexOf(a) : scoreOrder.length;
+      const bi = scoreOrder.includes(b) ? scoreOrder.indexOf(b) : scoreOrder.length;
+      return ai - bi || a.localeCompare(b, 'zh-Hans-CN');
+    });
+  const purposes = dedupeArray(entries.flatMap(getObsidianEntryPurposeList)).sort((a, b) => a.localeCompare(b, 'zh-Hans-CN'));
+  return { folders, types, themes, scores, purposes };
 }
 
-function populateObsidianKnowledgeFilters(folderSelect, typeSelect) {
-  const { folders, types } = getObsidianKnowledgeFilters();
+function renderObsidianOptionList(prefix, items) {
+  return [
+    `<option value="all">${prefix}：全部</option>`,
+    ...items.map((item) => `<option value="${escapeHtml(item)}">${escapeHtml(item)}</option>`)
+  ].join('');
+}
+
+function populateObsidianKnowledgeFilters(folderSelect, typeSelect, themeSelect, scoreSelect, purposeSelect) {
+  const { folders, types, themes, scores, purposes } = getObsidianKnowledgeFilters();
   if (folderSelect) {
-    folderSelect.innerHTML = [
-      '<option value="all">目录：全部</option>',
-      ...folders.map((folder) => `<option value="${escapeHtml(folder)}">${escapeHtml(folder)}</option>`)
-    ].join('');
+    folderSelect.innerHTML = renderObsidianOptionList('目录', folders);
   }
   if (typeSelect) {
-    typeSelect.innerHTML = [
-      '<option value="all">题型：全部</option>',
-      ...types.map((type) => `<option value="${escapeHtml(type)}">${escapeHtml(type)}</option>`)
-    ].join('');
+    typeSelect.innerHTML = renderObsidianOptionList('题型', types);
   }
+  if (themeSelect) themeSelect.innerHTML = renderObsidianOptionList('母题', themes);
+  if (scoreSelect) scoreSelect.innerHTML = renderObsidianOptionList('分数档', scores);
+  if (purposeSelect) purposeSelect.innerHTML = renderObsidianOptionList('用途', purposes);
 }
 
-function filterObsidianKnowledgeEntries({ query = '', folder = 'all', type = 'all' } = {}) {
+function filterObsidianKnowledgeEntries({ query = '', folder = 'all', type = 'all', theme = 'all', score = 'all', purpose = 'all' } = {}) {
   const q = normalizeObsidianMatchText(query);
   return getObsidianKnowledgeEntries().filter((entry) => {
     if (folder && folder !== 'all' && getObsidianEntryFolder(entry) !== folder) return false;
     if (type && type !== 'all' && String(entry.topicType || '未分类') !== type) return false;
+    if (theme && theme !== 'all' && getObsidianEntryTheme(entry) !== theme) return false;
+    if (score && score !== 'all' && getObsidianEntryScoreTier(entry) !== score) return false;
+    if (purpose && purpose !== 'all' && !getObsidianEntryPurposeList(entry).includes(purpose)) return false;
     if (!q) return true;
     return buildObsidianKnowledgeSearchText(entry).includes(q);
   });
@@ -7285,9 +7336,11 @@ function filterObsidianKnowledgeEntries({ query = '', folder = 'all', type = 'al
 
 function renderObsidianKnowledgeEntryCard(entry) {
   const folder = getObsidianEntryFolder(entry);
-  const tags = [entry.yearLabel, entry.topicType, entry.themeTag, entry.scoreBand?.isHighScore ? '高分标杆' : '', entry.docRole]
+  const purposes = getObsidianEntryPurposeList(entry);
+  const scoreTier = getObsidianEntryScoreTier(entry);
+  const tags = [entry.yearLabel, entry.topicType, getObsidianEntryTheme(entry), scoreTier, purposes[0], entry.docRole]
     .filter(Boolean)
-    .slice(0, 5)
+    .slice(0, 6)
     .map((tag) => `<span class="agent-tag">${escapeHtml(tag)}</span>`)
     .join('');
   return `
@@ -7297,6 +7350,7 @@ function renderObsidianKnowledgeEntryCard(entry) {
         <span>${escapeHtml(folder)}｜${escapeHtml(entry.notePath || entry.relativePath || '')}</span>
         <div class="agent-tags">${tags || '<span class="agent-tag">未分类</span>'}</div>
         <p>${escapeHtml(summarizeSentence(entry.preview || (entry.promptSamples || [])[0] || '', 86))}</p>
+        <p>用途：${escapeHtml(purposes.join('、') || '待归类')}｜分数档：${escapeHtml(scoreTier)}</p>
       </div>
       <div class="ob-kb-item-actions">
         <button class="agent-btn ghost" type="button" data-ob-kb-id="${escapeHtml(entry.id)}">查看</button>
@@ -7324,6 +7378,9 @@ function renderObsidianKnowledgeDirectory(panel, state = {}) {
   const queryHint = state.query ? `｜关键词：${state.query}` : '';
   const folderHint = state.folder && state.folder !== 'all' ? `｜目录：${state.folder}` : '';
   const typeHint = state.type && state.type !== 'all' ? `｜题型：${state.type}` : '';
+  const themeHint = state.theme && state.theme !== 'all' ? `｜母题：${state.theme}` : '';
+  const scoreHint = state.score && state.score !== 'all' ? `｜分数档：${state.score}` : '';
+  const purposeHint = state.purpose && state.purpose !== 'all' ? `｜用途：${state.purpose}` : '';
   const folderHtml = folders.map((folder, index) => {
     const list = grouped[folder].slice(0, 40).map(renderObsidianKnowledgeEntryCard).join('');
     const extra = grouped[folder].length > 40 ? `<p class="agent-empty">该目录还有 ${grouped[folder].length - 40} 篇未展开，可继续用关键词缩小范围。</p>` : '';
@@ -7336,8 +7393,8 @@ function renderObsidianKnowledgeDirectory(panel, state = {}) {
   }).join('');
   panel.innerHTML = `
     <div class="ob-kb-summary">
-      <strong>OB知识库目录</strong>
-      <span>已收录 ${total} 篇，本次显示 ${entries.length} 篇${escapeHtml(queryHint + folderHint + typeHint)}</span>
+      <strong>OB知识库检索系统</strong>
+      <span>已收录 ${total} 篇，本次显示 ${entries.length} 篇${escapeHtml(queryHint + folderHint + typeHint + themeHint + scoreHint + purposeHint)}</span>
     </div>
     ${folderHtml || '<p class="agent-empty">没有匹配结果。可以换关键词，如“认可度”“断舍离”“专转传”“一类”。</p>'}
   `;
@@ -7360,6 +7417,8 @@ function renderObsidianKnowledgeEntry(entry, panel, fullText = '') {
   const teachingEssay = getObsidianTeachingEssayById(entry.id);
   const actions = buildObsidianKnowledgeLearningActions(entry).map((item) => `<li>${escapeHtml(item)}</li>`).join('');
   const promptRows = (entry.promptSamples || []).slice(0, 3).map((item) => `<li>${escapeHtml(item)}</li>`).join('');
+  const purposeLine = getObsidianEntryPurposeList(entry).join('、') || '待归类';
+  const scoreTier = getObsidianEntryScoreTier(entry);
   const fullTextBlock = fullText
     ? `<div class="ob-kb-fulltext">${renderObsidianMarkdownPreview(fullText, 4200)}</div>`
     : `<p class="agent-empty">点击“读原文”可加载 Markdown 正文预览；若本地 file 打开受限，请用 http://127.0.0.1:5500 访问。</p>`;
@@ -7368,7 +7427,8 @@ function renderObsidianKnowledgeEntry(entry, panel, fullText = '') {
       <h4>${escapeHtml(entry.title || 'OB档案')}</h4>
       <p><strong>目录</strong>：${escapeHtml(getObsidianEntryFolder(entry))}</p>
       <p><strong>路径</strong>：${escapeHtml(entry.notePath || entry.relativePath || '')}</p>
-      <p><strong>标签</strong>：${escapeHtml([entry.yearLabel, entry.docRole, entry.topicType, entry.themeTag, entry.scoreBand?.label || (entry.scoreBand?.isHighScore ? '高分标杆' : '')].filter(Boolean).join('｜') || '未标注')}</p>
+      <p><strong>标签</strong>：${escapeHtml([entry.yearLabel, entry.docRole, entry.topicType, getObsidianEntryTheme(entry), scoreTier].filter(Boolean).join('｜') || '未标注')}</p>
+      <p><strong>写作用途</strong>：${escapeHtml(purposeLine)}</p>
       <p><strong>摘要</strong>：${escapeHtml(entry.preview || '暂无摘要')}</p>
       <p><strong>题目/摘录</strong></p>
       <ul>${promptRows || '<li>暂无题目摘录。</li>'}</ul>
@@ -7405,13 +7465,16 @@ async function loadObsidianMarkdown(entry) {
   return response.text();
 }
 
-function initObsidianKnowledgeBrowser({ searchInput, folderSelect, typeSelect, searchBtn, resetBtn, panel, tutorPanel, essaySelect, topicInput }) {
+function initObsidianKnowledgeBrowser({ searchInput, folderSelect, typeSelect, themeSelect, scoreSelect, purposeSelect, searchBtn, resetBtn, panel, tutorPanel, essaySelect, topicInput }) {
   if (!panel) return;
-  populateObsidianKnowledgeFilters(folderSelect, typeSelect);
+  populateObsidianKnowledgeFilters(folderSelect, typeSelect, themeSelect, scoreSelect, purposeSelect);
   const getState = () => ({
     query: searchInput?.value?.trim() || '',
     folder: folderSelect?.value || 'all',
-    type: typeSelect?.value || 'all'
+    type: typeSelect?.value || 'all',
+    theme: themeSelect?.value || 'all',
+    score: scoreSelect?.value || 'all',
+    purpose: purposeSelect?.value || 'all'
   });
   const renderCurrent = () => renderObsidianKnowledgeDirectory(panel, getState());
   renderCurrent();
@@ -7421,10 +7484,16 @@ function initObsidianKnowledgeBrowser({ searchInput, folderSelect, typeSelect, s
   });
   folderSelect?.addEventListener('change', renderCurrent);
   typeSelect?.addEventListener('change', renderCurrent);
+  themeSelect?.addEventListener('change', renderCurrent);
+  scoreSelect?.addEventListener('change', renderCurrent);
+  purposeSelect?.addEventListener('change', renderCurrent);
   resetBtn?.addEventListener('click', () => {
     if (searchInput) searchInput.value = '';
     if (folderSelect) folderSelect.value = 'all';
     if (typeSelect) typeSelect.value = 'all';
+    if (themeSelect) themeSelect.value = 'all';
+    if (scoreSelect) scoreSelect.value = 'all';
+    if (purposeSelect) purposeSelect.value = 'all';
     renderCurrent();
   });
   panel.addEventListener('click', async (event) => {
@@ -7516,12 +7585,31 @@ function pickBestParagraphToStudy(essay, topic) {
   return scored.sort((a, b) => b.studyScore - a.studyScore)[0] || rows[0];
 }
 
+function describeObsidianMoveAction(row, essay, topic = '') {
+  const keys = row?.moveKeys || [];
+  const labels = row?.moveLabels || [];
+  const role = row?.role || '段落功能';
+  const topicHint = extractTopicPhrases(topic).slice(0, 2).join('、') || essay?.topicKey || essay?.title || '当前题目';
+  if (keys.includes('definition')) return `学它如何在第${row?.index || 1}段界定概念，并把“${topicHint}”限定到可论证范围。`;
+  if (keys.includes('mechanism')) return `学它如何在例证后补“原因-机制-结果”，说明材料为什么能证明中心论点。`;
+  if (keys.includes('transition')) return `学它如何用转折承认另一面，再把文章从单向表态推向辩证判断。`;
+  if (keys.includes('boundary')) return `学它如何收住绝对化结论，写清观点成立的条件和失效边界。`;
+  if (keys.includes('reality')) return `学它如何把抽象判断落到当代生活、校园经验或社会场景。`;
+  if (/开篇|起/.test(role)) return `学它如何开头不绕圈，直接把题目问题转成中心判断。`;
+  if (/收束|结尾/.test(role)) return `学它如何结尾回到题目，不喊口号，而是留下条件化判断。`;
+  return labels.length
+    ? `学它的${labels.slice(0, 2).join('、')}动作，回到自己的作文只迁移这一种段落功能。`
+    : `学它如何承担“${role}”，不要照抄句子，只学推进方式。`;
+}
+
 function renderObsidianTopicRecommendations(topic, panel) {
   if (!panel) return;
   const picks = recommendObsidianTeachingEssays(topic, 3);
   if (!picks.length) return void renderObsidianTutorMessage(panel, '暂未匹配到合适的 OB 范文，请换一个更完整的题目再试。');
   const cards = picks.map((essay, index) => {
     const row = pickBestParagraphToStudy(essay, topic);
+    const action = describeObsidianMoveAction(row, essay, topic);
+    const moveLabels = (row?.moveLabels || []).slice(0, 3).join('、') || row?.role || '段落推进';
     return `
       <div class="flaw-row">
         <div class="flaw-row-top">
@@ -7530,8 +7618,9 @@ function renderObsidianTopicRecommendations(topic, panel) {
         </div>
         <p><strong>档案信息</strong>：${escapeHtml(buildTeachingEssayMetaLine(essay))}</p>
         <p><strong>为什么推荐</strong>：${escapeHtml((essay.matchReasons || []).join('；') || '题型和母题接近。')}</p>
-        <p><strong>看第几段</strong>：第${row?.index || 1}段｜${escapeHtml(row?.role || '段落功能')}</p>
-        <p><strong>看什么</strong>：${escapeHtml(row?.learnPoint || '看它如何完成段落功能。')}</p>
+        <p><strong>看第几段</strong>：第${row?.index || 1}段｜${escapeHtml(row?.role || '段落功能')}｜${escapeHtml(moveLabels)}</p>
+        <p><strong>学什么动作</strong>：${escapeHtml(action)}</p>
+        <p><strong>原段提醒</strong>：${escapeHtml(row?.learnPoint || '看它如何完成段落功能。')}</p>
         <p><strong>证据句</strong>：${escapeHtml(row?.evidence || essay.thesis || '')}</p>
         <button class="agent-btn ghost" type="button" data-ob-dissect-id="${escapeHtml(essay.id)}">解剖这篇</button>
         <button class="agent-btn ghost" type="button" data-ob-task-id="${escapeHtml(essay.id)}">生成对照任务卡</button>
@@ -7555,6 +7644,7 @@ function renderObsidianParagraphPath(essay) {
     <div class="score-grid">
       ${visibleRows.map((row) => {
         const labels = (row.moveLabels || []).slice(0, 2).join('、') || '段落推进';
+        const action = describeObsidianMoveAction(row, essay, essay?.prompt || essay?.topicKey || '');
         return `
           <div class="flaw-row">
             <div class="flaw-row-top">
@@ -7563,6 +7653,7 @@ function renderObsidianParagraphPath(essay) {
             </div>
             <p><strong>承担动作</strong>：${escapeHtml(labels)}</p>
             <p><strong>孩子要看</strong>：${escapeHtml(row.learnPoint || '看这一段如何推进中心论点。')}</p>
+            <p><strong>迁移动作</strong>：${escapeHtml(action)}</p>
           </div>
         `;
       }).join('')}
@@ -8575,6 +8666,15 @@ async function runBaselineHealthCheck() {
     'obActionTypeSelect',
     'obActionBankBtn',
     'obTutorPanel',
+    'obKnowledgeSearchInput',
+    'obKnowledgeFolderSelect',
+    'obKnowledgeTypeSelect',
+    'obKnowledgeThemeSelect',
+    'obKnowledgeScoreSelect',
+    'obKnowledgePurposeSelect',
+    'obKnowledgeSearchBtn',
+    'obKnowledgeResetBtn',
+    'obKnowledgePanel',
     'manualScoreInput',
     'manualCalibrationBtn',
     'regressionTestBtn',
