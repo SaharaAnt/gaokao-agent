@@ -7005,6 +7005,7 @@ function renderSameTopicCalibrationPanel(report) {
   const rows = samples.map((sample) => `
     <div class="flaw-row">
       <div class="flaw-row-top"><span>${escapeHtml(sample.label)}</span><strong>${sample.expectedScore}/70</strong></div>
+      <p><strong>样本来源</strong>：${escapeHtml(sample.sourceKind || '校准样本')}</p>
       <p><strong>老师原评理由</strong>：${escapeHtml(sample.teacherReason)}</p>
       <p><strong>扣分点</strong>：${escapeHtml(sample.deductions)}</p>
     </div>
@@ -8033,6 +8034,73 @@ function renderTeacherClosedLoopPanel(report, mode = 'score') {
   `;
 }
 
+function getTeacherPriorityDimensions(report) {
+  const items = [
+    { label: '材料核心立意', score: report.intent?.score, max: report.intent?.max, fallback: '先确认题眼、关系和设问重心没有偏。' },
+    { label: '中心论点', score: report.thesis?.score, max: report.thesis?.max, fallback: '把中心判断写成“立场+条件+关系+边界”。' },
+    { label: '论证逻辑', score: report.argument?.score, max: report.argument?.max, fallback: '每个例证后补一句机制解释。' },
+    { label: '论据新旧', score: report.material?.score, max: report.material?.max, fallback: '补一个贴近当下生活的观察场景。' },
+    { label: '语言表达', score: report.language?.score, max: report.language?.max, fallback: '删空泛形容词，保留判断句和分析句。' },
+    { label: '结构章法', score: report.structure?.score, max: report.structure?.max, fallback: '检查段落是否完成界定、推进、转折、收束。' }
+  ];
+  return items
+    .map((item) => ({
+      ...item,
+      score: Number(item.score || 0),
+      max: Number(item.max || 1),
+      ratio: Number(item.score || 0) / Math.max(Number(item.max || 1), 1)
+    }))
+    .sort((a, b) => a.ratio - b.ratio);
+}
+
+function renderTeacherOneScreenConclusion(report, mode = 'score') {
+  const evidenceMap = buildTeacherScoreEvidenceMap(report);
+  const boundary = buildScoreBandBoundaryExplanation(report);
+  const realSummary = getRealScoreCalibrationSummary();
+  const priorityRows = getTeacherPriorityDimensions(report).slice(0, 3).map((item, index) => {
+    const evidence = evidenceMap[item.label]?.evidence || '暂无稳定证据句';
+    const task = evidenceMap[item.label]?.task || item.fallback;
+    return `
+      <div class="flaw-row">
+        <div class="flaw-row-top"><span>${index + 1}. 先改${escapeHtml(item.label)}</span><strong>${item.score}/${item.max}</strong></div>
+        <p><strong>证据句</strong>：${escapeHtml(evidence)}</p>
+        <p><strong>学生动作</strong>：${escapeHtml(task)}</p>
+      </div>
+    `;
+  }).join('');
+  const sourceGrade = report.officialScore?.sourceGrade
+    ? `${report.officialScore.sourceGrade.label} ${report.officialScore.sourceGrade.score}分`
+    : '未检测到资料原评';
+  const notHigher = boundary.whyNotHigher?.[0] || '上一档卡点不明显，继续看中心深度、机制解释和边界处理。';
+  const notLower = boundary.whyNotLower?.[0] || '仍有基本扣题和结构完成度，暂不宜继续下压。';
+  const calibrationLine = realSummary.loaded
+    ? `真实老师样本${realSummary.total}/${realSummary.targetCount}篇已接入；当前仍以规则+OB高分特征+人工复核共同校准。`
+    : '真实评分样本文件未加载；当前主要依赖规则锚点与OB高分特征。';
+  return `
+    <div class="agent-result-block teacher-one-screen">
+      <h4>${mode === 'critique' ? '一屏精批结论' : '一屏阅卷结论'}</h4>
+      <div class="score-calibration-kpi">
+        <div class="flaw-row">
+          <div class="flaw-row-top"><span>当前判定</span><strong>${report.total70}/70</strong></div>
+          <p>${escapeHtml(report.officialScore?.band || report.intent?.band || '')}${report.officialScore?.bandLane ? `｜${escapeHtml(report.officialScore.bandLane)}` : ''}</p>
+          <p>资料原评：${escapeHtml(sourceGrade)}</p>
+        </div>
+        <div class="flaw-row">
+          <div class="flaw-row-top"><span>为什么不是上一档</span><strong>卡点</strong></div>
+          <p>${escapeHtml(notHigher)}</p>
+        </div>
+        <div class="flaw-row">
+          <div class="flaw-row-top"><span>为什么不再下压</span><strong>保分</strong></div>
+          <p>${escapeHtml(notLower)}</p>
+        </div>
+      </div>
+      <p class="agent-para-issues">${escapeHtml(calibrationLine)}</p>
+      <div class="score-grid">${priorityRows}</div>
+      <p class="agent-para-issues">先处理这三项即可；系统只指出问题和证据，不替孩子改正文。</p>
+    </div>
+  `;
+}
+
 function renderTeacherScoreReport(report, container) {
   const sentenceQuality = analyzeSentenceQuality(report.topic, report.draft, report.analysis?.topicPhrases || report.offTopic?.topicPhrases || []);
   const goodRows = renderSentenceQualityItems(sentenceQuality.goodItems || [], 'good');
@@ -8053,6 +8121,7 @@ function renderTeacherScoreReport(report, container) {
         <span class="agent-tag risk ${normalizeRiskClass(report.offTopic?.riskLevel || '中')}">偏题风险：${escapeHtml(report.offTopic?.riskLevel || '中')}</span>
       </div>
     </div>
+    ${renderTeacherOneScreenConclusion(report, 'score')}
     <div class="agent-result-block">
       <h4>上海分档赋分依据</h4>
       <p><strong>先定档</strong>：${escapeHtml(report.officialScore?.initialBand || report.intent.band)}｜${escapeHtml(report.officialScore?.bandReason || report.intent.detail)}</p>
@@ -8140,6 +8209,7 @@ function renderTeacherCritiqueReport(report, container) {
         <span class="agent-tag">书写项：${report.handwriting.score}/${report.handwriting.max}</span>
       </div>
     </div>
+    ${renderTeacherOneScreenConclusion(report, 'critique')}
     <div class="agent-result-block">
       <h4>上海分档赋分依据</h4>
       <p><strong>先定档</strong>：${escapeHtml(report.officialScore?.initialBand || report.intent.band)}｜${escapeHtml(report.officialScore?.bandReason || report.intent.detail)}</p>
@@ -8553,6 +8623,15 @@ async function runBaselineHealthCheck() {
     detail: versionCheck.message
   });
 
+  const realCalibration = getRealScoreCalibrationSummary();
+  checks.push({
+    name: '真实评分样本结构',
+    ok: realCalibration.loaded,
+    detail: realCalibration.loaded
+      ? `已接入${realCalibration.source}：真实样本${realCalibration.total}/${realCalibration.targetCount}篇，模板${realCalibration.templateCount}个。`
+      : '未加载 score_calibration_samples.js，人工真实评分样本无法沉淀。'
+  });
+
   const featureCheck = runFeatureFlowChecks();
   checks.push(...featureCheck);
   const regression = await runRegressionSuite();
@@ -8787,7 +8866,7 @@ function buildCalibrationSampleDraft(topicInfo, tier) {
 }
 
 function getShanghaiScoreCalibrationSamples() {
-  return getCalibrationTopicSet().flatMap((topicInfo) =>
+  const syntheticSamples = getCalibrationTopicSet().flatMap((topicInfo) =>
     getCalibrationTierSet().map((tier) => ({
       id: `${topicInfo.id}-${tier.key}`,
       label: `${topicInfo.key}｜${tier.label}`,
@@ -8797,14 +8876,88 @@ function getShanghaiScoreCalibrationSamples() {
       expectedBand: tier.band,
       teacherReason: tier.reason,
       deductions: tier.deduction,
+      sourceKind: '系统同题多档样本',
       draft: buildCalibrationSampleDraft(topicInfo, tier)
     }))
   );
+  return [...getRealScoreCalibrationSamples(), ...syntheticSamples];
+}
+
+function getRealScoreCalibrationRegistry() {
+  const fallback = {
+    loaded: false,
+    version: 0,
+    source: 'score_calibration_samples.js',
+    samples: [],
+    sampleTemplates: []
+  };
+  try {
+    if (typeof window !== 'undefined' && window.REAL_SCORE_CALIBRATION_REGISTRY) {
+      return { ...fallback, loaded: true, ...window.REAL_SCORE_CALIBRATION_REGISTRY };
+    }
+    if (typeof REAL_SCORE_CALIBRATION_REGISTRY !== 'undefined' && REAL_SCORE_CALIBRATION_REGISTRY) {
+      return { ...fallback, loaded: true, ...REAL_SCORE_CALIBRATION_REGISTRY };
+    }
+  } catch (_) {}
+  return fallback;
+}
+
+function normalizeRealScoreCalibrationSample(sample, index) {
+  if (!sample || sample.status !== 'verified') return null;
+  const teacherScore = Number(sample.teacherScore);
+  if (!Number.isFinite(teacherScore) || teacherScore < 0 || teacherScore > 70) return null;
+  const topic = String(sample.topic || '').trim();
+  const draft = String(sample.essay || sample.draft || '').trim();
+  if (!topic || !draft) return null;
+  return {
+    id: sample.id || `real-score-sample-${index + 1}`,
+    label: sample.label || `${sample.teacherBand || getShanghaiOfficialBand(teacherScore)}｜真实老师评分样本`,
+    topic,
+    topicType: sample.topicType || detectTopicType(topic).name,
+    expectedScore: teacherScore,
+    expectedBand: sample.teacherBand || getShanghaiOfficialBand(teacherScore),
+    teacherReason: (sample.scoreReasons || []).join('；') || sample.teacherComment || '真实老师评分样本，待补充得分理由。',
+    deductions: (sample.deductions || []).join('；') || sample.deductionNotes || '暂无明确扣分点。',
+    sourceKind: sample.source || '真实老师评分样本',
+    draft,
+    raw: sample
+  };
+}
+
+function getRealScoreCalibrationSamples() {
+  const registry = getRealScoreCalibrationRegistry();
+  return (registry.samples || [])
+    .map((sample, index) => normalizeRealScoreCalibrationSample(sample, index))
+    .filter(Boolean);
+}
+
+function getRealScoreCalibrationSummary() {
+  const registry = getRealScoreCalibrationRegistry();
+  const samples = getRealScoreCalibrationSamples();
+  const byBand = {};
+  const byType = {};
+  samples.forEach((sample) => {
+    const band = sample.expectedBand || getShanghaiOfficialBand(sample.expectedScore);
+    byBand[band] = (byBand[band] || 0) + 1;
+    const type = sample.topicType || '未分类';
+    byType[type] = (byType[type] || 0) + 1;
+  });
+  return {
+    loaded: !!registry.loaded,
+    source: registry.source || 'score_calibration_samples.js',
+    version: registry.version || 0,
+    total: samples.length,
+    byBand,
+    byType,
+    templateCount: (registry.sampleTemplates || []).length,
+    targetCount: registry.targetCount || 30
+  };
 }
 
 async function runShanghaiScoreCalibrationSuite() {
   const samples = getShanghaiScoreRegressionSamples();
   const sampleBank = getShanghaiScoreCalibrationSamples();
+  const realSummary = getRealScoreCalibrationSummary();
   const cases = [];
   for (const sample of samples) {
     try {
@@ -8853,9 +9006,10 @@ async function runShanghaiScoreCalibrationSuite() {
     bias,
     bandAccuracy,
     sampleBankSize: sampleBank.length,
+    realSampleCount: realSummary.total,
     sameTopicGroupCount: getCalibrationTopicSet().length,
     level: passed === cases.length ? '通过' : (passed >= cases.length - 1 ? '基本通过' : '需校准'),
-    summary: `档位准确率${bandAccuracy}%，平均误差${meanAbsError}分，整体${bias > 0 ? '偏松' : (bias < 0 ? '偏严' : '基本平衡')}${Math.abs(bias)}分。`
+    summary: `档位准确率${bandAccuracy}%，平均误差${meanAbsError}分，整体${bias > 0 ? '偏松' : (bias < 0 ? '偏严' : '基本平衡')}${Math.abs(bias)}分；真实老师样本${realSummary.total}/${realSummary.targetCount}篇。`
   };
 }
 
@@ -8895,22 +9049,25 @@ function testLocalStorage() {
 }
 
 function checkScriptVersions() {
-  const scripts = [...document.querySelectorAll('script[src]')].map((s) => s.getAttribute('src') || '');
+  const resources = [
+    ...[...document.querySelectorAll('script[src]')].map((s) => s.getAttribute('src') || ''),
+    ...[...document.querySelectorAll('link[rel="stylesheet"][href]')].map((s) => s.getAttribute('href') || '')
+  ];
+  const required = ['styles.css', 'data.js', 'score_calibration_samples.js', 'app.js'];
   const pickV = (name) => {
-    const hit = scripts.find((src) => src.includes(name));
+    const hit = resources.find((src) => src.includes(name));
     if (!hit) return null;
     const m = hit.match(/[?&]v=(\d+)/);
     return m ? Number(m[1]) : null;
   };
-  const dv = pickV('data.js');
-  const av = pickV('app.js');
-  if (dv == null || av == null) {
-    return { ok: false, message: '脚本未带版本号，建议统一追加 ?v=数字' };
-  }
-  const ok = dv === av;
+  const versions = required.map((name) => ({ name, version: pickV(name) }));
+  const missing = versions.filter((item) => item.version == null);
+  const ok = missing.length === 0;
   return {
     ok,
-    message: ok ? `版本一致：v=${dv}` : `版本不一致：data v${dv} / app v${av}`
+    message: ok
+      ? `资源版本号齐全：${versions.map((item) => `${item.name} v${item.version}`).join(' / ')}`
+      : `以下资源缺少 ?v=数字：${missing.map((item) => item.name).join('、')}`
   };
 }
 
@@ -9307,7 +9464,7 @@ function renderRegressionReport(report, container) {
       </div>
     </div>
     <div class="agent-result-block"><h4>回归样例</h4><div class="score-grid">${rows}</div></div>
-    ${calibration ? `<div class="agent-result-block"><h4>评分校准锚点验收</h4><p>${escapeHtml(calibration.summary)}</p><p>样本库：${escapeHtml(String(calibration.sampleBankSize || 0))}篇｜同题多档组：${escapeHtml(String(calibration.sameTopicGroupCount || 0))}组</p><div class="score-grid">${calibrationRows}</div><p class="agent-para-issues">这组硬回归样本是评分引擎的“秤砣”；完整样本库提供一类上/中/下、二类上/中/下、三类、四类的同题多档参照。</p></div>` : ''}
+    ${calibration ? `<div class="agent-result-block"><h4>评分校准锚点验收</h4><p>${escapeHtml(calibration.summary)}</p><p>样本库：${escapeHtml(String(calibration.sampleBankSize || 0))}篇｜真实老师样本：${escapeHtml(String(calibration.realSampleCount || 0))}篇｜同题多档组：${escapeHtml(String(calibration.sameTopicGroupCount || 0))}组</p><div class="score-grid">${calibrationRows}</div><p class="agent-para-issues">这组硬回归样本是评分引擎的“秤砣”；完整样本库提供一类上/中/下、二类上/中/下、三类、四类的同题多档参照。</p></div>` : ''}
   `;
 }
 
