@@ -290,6 +290,45 @@ body {
   flex-wrap: wrap;
   justify-content: flex-end;
 }
+.ob-match-breakdown {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  margin: 8px 0;
+}
+.ob-match-breakdown span,
+.ob-study-route div {
+  border: 1px solid rgba(138, 106, 66, 0.16);
+  border-radius: 12px;
+  padding: 8px;
+  background: rgba(255, 253, 247, 0.72);
+}
+.ob-match-breakdown span.hit {
+  border-color: rgba(14, 165, 233, 0.36);
+  background: rgba(224, 242, 254, 0.62);
+}
+.ob-match-breakdown strong,
+.ob-study-route strong {
+  display: block;
+  color: var(--text);
+  font-size: 12px;
+}
+.ob-match-breakdown em,
+.ob-study-route em,
+.ob-study-route span {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  font-style: normal;
+  line-height: 1.45;
+  margin-top: 3px;
+}
+.ob-study-route {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 8px 0;
+}
 .ob-kb-detail h4 {
   margin-bottom: 8px;
 }
@@ -952,6 +991,10 @@ body {
   }
   .ob-kb-item-actions {
     justify-content: flex-start;
+  }
+  .ob-match-breakdown,
+  .ob-study-route {
+    grid-template-columns: 1fr;
   }
   .handwriting-upload-row {
     display: grid;
