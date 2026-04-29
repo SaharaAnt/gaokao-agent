@@ -181,6 +181,68 @@ document.addEventListener('DOMContentLoaded', () => {
 
 function safeInit(fn) { try { fn(); } catch (_) {} }
 
+const HANDWRITING_OCR_FEATURE_ENABLED = false;
+const INTERNAL_DIAGNOSTICS_ENABLED = false;
+
+function getHandwritingPageCount() {
+  return (typeof HANDWRITING_SCAN_STATE !== 'undefined' && Array.isArray(HANDWRITING_SCAN_STATE.pages))
+    ? HANDWRITING_SCAN_STATE.pages.length
+    : 0;
+}
+
+function getHandwritingFallbackAssessment() {
+  return {
+    score: 2,
+    max: 4,
+    detail: '当前已关闭手写图片 OCR，评分仅依据文本草稿；书写卷面项暂按中档估计。'
+  };
+}
+
+function hideAndDisableControls(...controls) {
+  controls.forEach((control) => {
+    if (!control) return;
+    control.hidden = true;
+    control.setAttribute('aria-hidden', 'true');
+    if ('disabled' in control) control.disabled = true;
+  });
+}
+
+function resetDisabledHandwritingState(input) {
+  if (input) input.value = '';
+  if (typeof HANDWRITING_SCAN_STATE === 'undefined') return;
+  HANDWRITING_SCAN_STATE.pages = [];
+  HANDWRITING_SCAN_STATE.lastText = '';
+  HANDWRITING_SCAN_STATE.error = '';
+  HANDWRITING_SCAN_STATE.status = 'disabled';
+}
+
+async function resolveDraftForCurrentInput(draftInput, examWordCount, resultContainer, actionLabel) {
+  if (HANDWRITING_OCR_FEATURE_ENABLED && typeof resolveDraftFromInputOrHandwriting === 'function') {
+    return resolveDraftFromInputOrHandwriting(draftInput, examWordCount, resultContainer, actionLabel);
+  }
+  return { draft: draftInput?.value || '', fromOcr: false };
+}
+
+async function buildStableTeacherReviewReport(topic, draft, options = {}) {
+  const reviewOptions = { ...options };
+  if (!HANDWRITING_OCR_FEATURE_ENABLED && !reviewOptions.precomputedHandwriting) {
+    reviewOptions.precomputedHandwriting = getHandwritingFallbackAssessment();
+  }
+  return buildShanghaiTeacherReviewReport(topic, draft, reviewOptions);
+}
+
+function stripDisabledHandwritingOutput(container) {
+  if (HANDWRITING_OCR_FEATURE_ENABLED || !container) return;
+  const isHandwritingOutput = (text) => /(手写|OCR|识别结果|书写规范|书写项)/.test(text || '');
+  container.querySelectorAll('.agent-result-block').forEach((block) => {
+    const title = block.querySelector('h4')?.textContent || '';
+    if (isHandwritingOutput(title)) block.remove();
+  });
+  container.querySelectorAll('.flaw-row, .agent-tag, .score-card').forEach((node) => {
+    if (isHandwritingOutput(node.textContent || '')) node.remove();
+  });
+}
+
 function initParticles() {
   const container = document.getElementById('particles');
   if (!container) return;
@@ -347,6 +409,7 @@ function initAgentWorkbench() {
   const obKnowledgeSearchBtn = document.getElementById('obKnowledgeSearchBtn');
   const obKnowledgeResetBtn = document.getElementById('obKnowledgeResetBtn');
   const obKnowledgePanel = document.getElementById('obKnowledgePanel');
+  const handwritingPanel = document.getElementById('handwritingPanel');
   const handwritingImageInput = document.getElementById('handwritingImageInput');
   const handwritingOcrFillBtn = document.getElementById('handwritingOcrFillBtn');
   const clearHandwritingImageBtn = document.getElementById('clearHandwritingImageBtn');
@@ -362,6 +425,7 @@ function initAgentWorkbench() {
   const examState = { running: false, paused: false, remaining: EXAM_MODE_DURATION_SEC, timer: null };
   let tieredEssayCache = [];
 
+  if (!INTERNAL_DIAGNOSTICS_ENABLED) hideAndDisableControls(regressionTestBtn, baselineCheckBtn);
   renderEssayFilterBar(essayFilterBar, uiState.activeFilter, uiState.favorites);
   renderEssaySampleList(essaySampleList, uiState.activeFilter, uiState.favorites);
   renderMaterialCardList(materialCardList);
@@ -383,24 +447,31 @@ function initAgentWorkbench() {
     essaySelect: obEssaySelect,
     topicInput
   });
-  renderHandwritingPreviewList();
-  updateHandwritingUi('ready', HANDWRITING_SCAN_STATE.pages.length ? `已上传手写图片，评分时会自动OCR识别；若草稿框为空，会先自动回填正文（最多${HANDWRITING_MAX_FILES}张）。` : `未上传手写图片时，书写项暂按中档估计；最多支持上传${HANDWRITING_MAX_FILES}张。`);
+  if (HANDWRITING_OCR_FEATURE_ENABLED) {
+    renderHandwritingPreviewList();
+    updateHandwritingUi('ready', getHandwritingPageCount() ? `已上传手写图片，评分时会自动OCR识别；若草稿框为空，会先自动回填正文（最多${HANDWRITING_MAX_FILES}张）。` : `未上传手写图片时，书写项暂按中档估计；最多支持上传${HANDWRITING_MAX_FILES}张。`);
+  } else {
+    hideAndDisableControls(handwritingPanel, handwritingImageInput, handwritingOcrFillBtn, clearHandwritingImageBtn);
+    resetDisabledHandwritingState(handwritingImageInput);
+  }
   updateExamWordCountDisplay(draftInput, examWordCount);
   renderExamCountdown(examCountdown, examState.remaining);
 
-  handwritingImageInput?.addEventListener('change', async (e) => {
-    try {
-      await handleHandwritingFiles(e.target.files);
-    } catch (error) {
-      HANDWRITING_SCAN_STATE.status = 'error';
-      HANDWRITING_SCAN_STATE.error = error?.message || '图片读取失败';
-      updateHandwritingUi('error', `手写图片读取失败：${HANDWRITING_SCAN_STATE.error}`);
-    }
-  });
-  handwritingOcrFillBtn?.addEventListener('click', async () => {
-    await fillDraftFromHandwritingImages(draftInput, examWordCount, resultContainer);
-  });
-  clearHandwritingImageBtn?.addEventListener('click', () => clearHandwritingUpload(handwritingImageInput));
+  if (HANDWRITING_OCR_FEATURE_ENABLED) {
+    handwritingImageInput?.addEventListener('change', async (e) => {
+      try {
+        await handleHandwritingFiles(e.target.files);
+      } catch (error) {
+        HANDWRITING_SCAN_STATE.status = 'error';
+        HANDWRITING_SCAN_STATE.error = error?.message || '图片读取失败';
+        updateHandwritingUi('error', `手写图片读取失败：${HANDWRITING_SCAN_STATE.error}`);
+      }
+    });
+    handwritingOcrFillBtn?.addEventListener('click', async () => {
+      await fillDraftFromHandwritingImages(draftInput, examWordCount, resultContainer);
+    });
+    clearHandwritingImageBtn?.addEventListener('click', () => clearHandwritingUpload(handwritingImageInput));
+  }
   obDissectBtn?.addEventListener('click', () => {
     const essay = getObsidianTeachingEssayById(obEssaySelect?.value);
     if (!essay) return void renderObsidianTutorMessage(obTutorPanel, '请先选择一篇 OB 范文。');
@@ -471,6 +542,13 @@ function initAgentWorkbench() {
       const report = await buildOffTopicCheckReport(topic, draft);
       recordErrorBookEntry({ topic, draft, offTopic: report, source: 'offtopic' });
       renderOffTopicReport(report, resultContainer);
+      insertObFiveQuestionPanel(resultContainer, buildObFiveQuestionKit({
+        topic,
+        draft,
+        analysis: analyzeEssayTopic(topic),
+        report,
+        mode: 'offtopic'
+      }), { heading: 'OB高考作文问答五问（防跑题复核）' });
     }
     catch (e) { resultContainer.innerHTML = `<p class="agent-empty">防跑题检查失败：${escapeHtml(e?.message || '未知错误')}</p>`; }
   });
@@ -479,17 +557,17 @@ function initAgentWorkbench() {
     try {
       const topic = topicInput.value.trim();
       if (!topic) return void (resultContainer.innerHTML = '<p class="agent-empty">请先输入作文题目。</p>');
-      const draftState = await resolveDraftFromInputOrHandwriting(draftInput, examWordCount, resultContainer, '草稿评分');
+      const draftState = await resolveDraftForCurrentInput(draftInput, examWordCount, resultContainer, '草稿评分');
       const draft = draftState.draft.trim();
       if (!draft) return void (resultContainer.innerHTML = `<p class="agent-empty">${draftState.fromOcr ? '手写图片已识别，但暂未成功提取出可用正文，请换一张更清晰、更平整的照片再试。' : '请先粘贴作文草稿。'}</p>`);
-      const hasHandwriting = HANDWRITING_SCAN_STATE.pages.length > 0;
-      resultContainer.innerHTML = `<p class="agent-empty">${hasHandwriting ? `${draftState.fromOcr ? '已自动回填手写正文，' : ''}检测到${HANDWRITING_SCAN_STATE.pages.length}张手写图片，正在自动OCR识别并生成上海模考阅卷报告，请稍候...` : '正在生成上海模考阅卷报告，请稍候...'}</p>`;
+      const hasHandwriting = HANDWRITING_OCR_FEATURE_ENABLED && getHandwritingPageCount() > 0;
+      resultContainer.innerHTML = `<p class="agent-empty">${hasHandwriting ? `${draftState.fromOcr ? '已自动回填手写正文，' : ''}检测到${getHandwritingPageCount()}张手写图片，正在自动OCR识别并生成上海模考阅卷报告，请稍候...` : '正在生成上海模考阅卷报告，请稍候...'}</p>`;
       const legacyScore = scoreEssayDraft(topic, draft);
-      const precomputedHandwriting = hasHandwriting ? await assessHandwritingByOCR(draft) : null;
+      const precomputedHandwriting = hasHandwriting ? await assessHandwritingByOCR(draft) : getHandwritingFallbackAssessment();
       if (hasHandwriting) {
         resultContainer.innerHTML = `<p class="agent-empty">${draftState.fromOcr ? '手写正文已自动写入草稿框，' : ''}手写图片识别已完成，正在整理上海模考阅卷报告...</p>`;
       }
-      const report = await buildShanghaiTeacherReviewReport(topic, draft, { precomputedHandwriting });
+      const report = await buildStableTeacherReviewReport(topic, draft, { precomputedHandwriting });
       updateTrainingStats(legacyScore.dimensions, {
         topic,
         total: legacyScore.total,
@@ -500,6 +578,14 @@ function initAgentWorkbench() {
       });
       recordErrorBookEntry({ topic, draft, score: legacyScore, offTopic: legacyScore.offTopic, source: 'score' });
       renderTeacherScoreReport(report, resultContainer);
+      stripDisabledHandwritingOutput(resultContainer);
+      insertObFiveQuestionPanel(resultContainer, buildObFiveQuestionKit({
+        topic,
+        draft,
+        analysis: report.analysis,
+        report,
+        mode: 'score'
+      }), { heading: 'OB高考作文问答五问（草稿评分复核）' });
     } catch (error) {
       renderWorkbenchActionError(resultContainer, '草稿评分失败', error);
     }
@@ -509,17 +595,17 @@ function initAgentWorkbench() {
     try {
       const topic = topicInput.value.trim();
       if (!topic) return void (resultContainer.innerHTML = '<p class="agent-empty">请先输入作文题目。</p>');
-      const draftState = await resolveDraftFromInputOrHandwriting(draftInput, examWordCount, resultContainer, '习作精批');
+      const draftState = await resolveDraftForCurrentInput(draftInput, examWordCount, resultContainer, '习作精批');
       const draft = draftState.draft.trim();
       if (!draft) return void (resultContainer.innerHTML = `<p class="agent-empty">${draftState.fromOcr ? '手写图片已识别，但暂未成功提取出可用正文，请换一张更清晰、正向拍摄的照片再试。' : '请先粘贴作文草稿。'}</p>`);
-      const hasHandwriting = HANDWRITING_SCAN_STATE.pages.length > 0;
-      resultContainer.innerHTML = `<p class="agent-empty">${hasHandwriting ? `${draftState.fromOcr ? '已自动回填手写正文，' : ''}检测到${HANDWRITING_SCAN_STATE.pages.length}张手写图片，正在自动OCR识别并生成老师式逐段精批，请稍候...` : '正在生成老师式逐段精批，请稍候...'}</p>`;
+      const hasHandwriting = HANDWRITING_OCR_FEATURE_ENABLED && getHandwritingPageCount() > 0;
+      resultContainer.innerHTML = `<p class="agent-empty">${hasHandwriting ? `${draftState.fromOcr ? '已自动回填手写正文，' : ''}检测到${getHandwritingPageCount()}张手写图片，正在自动OCR识别并生成老师式逐段精批，请稍候...` : '正在生成老师式逐段精批，请稍候...'}</p>`;
       const legacyReport = buildMasterCritiqueReport(topic, draft);
-      const precomputedHandwriting = hasHandwriting ? await assessHandwritingByOCR(draft) : null;
+      const precomputedHandwriting = hasHandwriting ? await assessHandwritingByOCR(draft) : getHandwritingFallbackAssessment();
       if (hasHandwriting) {
         resultContainer.innerHTML = `<p class="agent-empty">${draftState.fromOcr ? '手写正文已自动写入草稿框，' : ''}手写图片识别已完成，正在整理老师式逐段精批...</p>`;
       }
-      const teacherReport = await buildShanghaiTeacherReviewReport(topic, draft, { precomputedHandwriting });
+      const teacherReport = await buildStableTeacherReviewReport(topic, draft, { precomputedHandwriting });
       updateTrainingStats(legacyReport.score.dimensions, {
         topic,
         total: legacyReport.score.total,
@@ -530,6 +616,14 @@ function initAgentWorkbench() {
       });
       recordErrorBookEntry({ topic, draft, score: legacyReport.score, offTopic: legacyReport.score.offTopic, source: 'critique' });
       renderTeacherCritiqueReport(teacherReport, resultContainer);
+      stripDisabledHandwritingOutput(resultContainer);
+      insertObFiveQuestionPanel(resultContainer, buildObFiveQuestionKit({
+        topic,
+        draft,
+        analysis: teacherReport.analysis,
+        report: teacherReport,
+        mode: 'critique'
+      }), { heading: 'OB高考作文问答五问（精批复核）' });
     } catch (error) {
       renderWorkbenchActionError(resultContainer, '习作精批失败', error);
     }
@@ -539,12 +633,13 @@ function initAgentWorkbench() {
     try {
       const topic = topicInput.value.trim();
       if (!topic) return void (resultContainer.innerHTML = '<p class="agent-empty">请先输入作文题目。</p>');
-      const draftState = await resolveDraftFromInputOrHandwriting(draftInput, examWordCount, resultContainer, '修改任务单');
+      const draftState = await resolveDraftForCurrentInput(draftInput, examWordCount, resultContainer, '修改任务单');
       const draft = draftState.draft.trim();
       if (!draft) return void (resultContainer.innerHTML = `<p class="agent-empty">${draftState.fromOcr ? '手写图片已识别，但暂未成功提取出可用正文，请换一张更清晰的照片再试。' : '请先粘贴作文草稿。'}</p>`);
       resultContainer.innerHTML = `<p class="agent-empty">${draftState.fromOcr ? '已自动回填手写正文，' : ''}正在整理修改任务单，请稍候...</p>`;
-      const teacherReport = await buildShanghaiTeacherReviewReport(topic, draft);
+      const teacherReport = await buildStableTeacherReviewReport(topic, draft);
       renderRevisionTaskList(teacherReport, resultContainer);
+      stripDisabledHandwritingOutput(resultContainer);
     } catch (error) {
       renderWorkbenchActionError(resultContainer, '修改任务单生成失败', error);
     }
@@ -554,15 +649,17 @@ function initAgentWorkbench() {
     renderWeeklyDashboardReport(buildWeeklyTrainingDashboard(), resultContainer);
   });
 
-  baselineCheckBtn?.addEventListener('click', async () => {
-    resultContainer.innerHTML = '<p class="agent-empty">正在进行基础自检，请稍候...</p>';
-    renderBaselineCheckReport(await runBaselineHealthCheck(), resultContainer);
-  });
+  if (INTERNAL_DIAGNOSTICS_ENABLED) {
+    baselineCheckBtn?.addEventListener('click', async () => {
+      resultContainer.innerHTML = '<p class="agent-empty">正在进行基础自检，请稍候...</p>';
+      renderBaselineCheckReport(await runBaselineHealthCheck(), resultContainer);
+    });
 
-  regressionTestBtn?.addEventListener('click', async () => {
-    resultContainer.innerHTML = '<p class="agent-empty">正在运行回归测试，请稍候...</p>';
-    renderRegressionReport(await runRegressionSuite(), resultContainer);
-  });
+    regressionTestBtn?.addEventListener('click', async () => {
+      resultContainer.innerHTML = '<p class="agent-empty">正在运行回归测试，请稍候...</p>';
+      renderRegressionReport(await runRegressionSuite(), resultContainer);
+    });
+  }
 
   manualCalibrationBtn?.addEventListener('click', async () => {
     try {
@@ -575,7 +672,7 @@ function initAgentWorkbench() {
         return void (resultContainer.innerHTML = '<p class="agent-empty">请填入0-70之间的老师实际分数。</p>');
       }
       resultContainer.innerHTML = '<p class="agent-empty">正在把老师实际分数写入评分校准本，请稍候...</p>';
-      const report = await buildShanghaiTeacherReviewReport(topic, draft);
+      const report = await buildStableTeacherReviewReport(topic, draft);
       const entry = saveManualScoreCalibrationEntry({ topic, draft, teacherScore, report });
       renderManualCalibrationReport(entry, buildManualScoreCalibrationSummary(), resultContainer);
     } catch (error) {
@@ -1032,7 +1129,7 @@ function analyzeEssayTopic(topic) {
   const outline = exampleGuidedKit?.structure?.length
     ? exampleGuidedKit.structure
     : buildTopicOutline(topic, topicType, topicPhrases, thesis);
-  return {
+  const analysis = {
     topic,
     topicType,
     topicPhrases,
@@ -1055,10 +1152,199 @@ function analyzeEssayTopic(topic) {
     examTemplateSets: buildExamTemplateSets(topic, topicType, topicPhrases),
     stanceOptions
   };
+  analysis.obFiveQuestionKit = buildObFiveQuestionKit({ topic, analysis, mode: 'planning' });
+  return analysis;
+}
+
+function buildObFiveQuestionKit({ topic = '', draft = '', analysis = null, report = null, mode = 'planning' } = {}) {
+  const topicType = analysis?.topicType || detectTopicType(topic);
+  const topicPhrases = normalizeTopicPhrases(analysis?.topicPhrases || extractTopicPhrases(topic)).slice(0, 6);
+  const text = String(report?.draft || draft || '').trim();
+  const paragraphs = splitParagraphs(text);
+  const sentences = paragraphs.flatMap((paragraph, paragraphIndex) => splitSentences(paragraph).map((sentence) => ({ paragraphIndex, sentence })));
+  const hasDraft = countWords(text) >= 30 || paragraphs.length >= 2;
+  const hitTopicTerms = hasDraft ? topicPhrases.filter((term) => text.includes(term)).length : 0;
+  const topicCoverageRatio = topicPhrases.length ? hitTopicTerms / topicPhrases.length : 0;
+  const transitionCount = countMatches(text, /(然而|但是|另一方面|同时|进一步|因此|由此|总之|诚然|换言之|归根结底)/g);
+  const boundaryCount = countMatches(text, /(前提|条件|边界|并非|未必|不是绝对|取决于|例外|限度|适度)/g);
+  const reasonCount = countMatches(text, /(因为|所以|因此|由于|意味着|本质|机制|关键在于|原因在于|由此可见)/g);
+  const evidenceCount = countMatches(text, /(例如|比如|譬如|案例|数据显示|据统计|《|“|”|孔子|苏轼|鲁迅|庄子|孟子|康德|黑格尔|罗素|尼采)/g);
+  const realityCount = countMatches(text, /(当下|现实|时代|社会|校园|技术|平台|算法|公共|生活|青年|世界)/g);
+  const absoluteCount = countMatches(text, /(绝对|唯一|必然|永远|完全|只要|一定|必须)/g);
+  const questionResponse = countMatches(text, /(是否|为何|为什么|怎样|如何|怎么看|对此|我认为|本文认为)/g);
+  const paragraphScores = (report?.paragraphRows || []).map((row) => Number(row.score || 0)).filter((score) => score > 0);
+  const avgParagraphScore = paragraphScores.length
+    ? Math.round(paragraphScores.reduce((sum, score) => sum + score, 0) / paragraphScores.length)
+    : 0;
+
+  const preview = (value, maxLen = 38) => {
+    const s = String(value || '').replace(/\s+/g, ' ').trim();
+    return s.length > maxLen ? `${s.slice(0, maxLen)}...` : s;
+  };
+  const evidenceSentence = (tests, fallback = '') => {
+    for (const item of sentences) {
+      if (tests.some((test) => test.test(item.sentence))) {
+        return `第${item.paragraphIndex + 1}段：“${preview(item.sentence)}”`;
+      }
+    }
+    return fallback || (hasDraft ? '暂未定位到稳定证据句。' : '写前阶段先用题目本身校准。');
+  };
+  const scoreText = (score, planningText) => hasDraft ? `${score}/100` : planningText;
+  const statusFromScore = (score) => {
+    if (!hasDraft) return '写前校准';
+    if (score >= 82) return '通过';
+    if (score >= 68) return '可用';
+    if (score >= 52) return '待补强';
+    return '高风险';
+  };
+  const item = (key, title, question, score, evidence, action, source) => ({
+    key,
+    title,
+    question,
+    score: hasDraft ? score : null,
+    status: statusFromScore(score),
+    scoreText: scoreText(score, '写前校准'),
+    evidence,
+    action,
+    source
+  });
+
+  const readingScore = clamp(Math.round(
+    36
+    + topicCoverageRatio * 34
+    + Math.min(questionResponse, 2) * 7
+    + Math.min(boundaryCount, 2) * 6
+    + (topicType.code === 'relation' && transitionCount === 0 ? -8 : 0)
+  ), 0, 100);
+  const intentScore = report?.intent?.score != null
+    ? clamp(Math.round((Number(report.intent.score || 0) / Math.max(Number(report.intent.max || 18), 1)) * 100), 0, 100)
+    : clamp(Math.round(44 + Math.min(reasonCount, 3) * 9 + Math.min(boundaryCount, 3) * 8 + Math.min(realityCount, 2) * 5 - Math.min(absoluteCount, 3) * 7), 0, 100);
+  const materialScore = report?.material?.score != null
+    ? clamp(Math.round((Number(report.material.score || 0) / Math.max(Number(report.material.max || 8), 1)) * 100), 0, 100)
+    : clamp(Math.round(38 + Math.min(evidenceCount, 5) * 9 + Math.min(reasonCount, 3) * 5 + Math.min(realityCount, 3) * 5), 0, 100);
+  const structureScore = report?.structure?.score != null
+    ? clamp(Math.round((Number(report.structure.score || 0) / Math.max(Number(report.structure.max || 8), 1)) * 100), 0, 100)
+    : clamp(Math.round(35 + Math.min(paragraphs.length, 5) * 8 + Math.min(transitionCount, 4) * 6 + (paragraphs.length >= 4 ? 10 : 0)), 0, 100);
+  const hierarchyScore = avgParagraphScore
+    ? clamp(Math.round(avgParagraphScore * 0.78 + Math.min(transitionCount, 4) * 5 + Math.min(boundaryCount, 2) * 4), 0, 100)
+    : clamp(Math.round(34 + Math.min(paragraphs.length, 5) * 7 + Math.min(transitionCount, 5) * 7 + Math.min(reasonCount, 4) * 4), 0, 100);
+
+  const topicLine = topicPhrases.length
+    ? `题眼：${topicPhrases.join('、')}；题型：${topicType.name || '未分类'}。`
+    : `题型：${topicType.name || '未分类'}；题眼需人工再圈一次。`;
+  return {
+    mode,
+    hasDraft,
+    source: 'OB《高考作文问答(一)-(五)》',
+    summary: hasDraft
+      ? '按 OB 五问把草稿重新过一遍：先防偏题，再看立意、材料、结构和层次。'
+      : '写前先按 OB 五问校准，不急着下笔，先确认题意、立意、材料、结构和层次。',
+    items: [
+      item(
+        'reading',
+        '一问：题意是否读准',
+        '是否完整读题，抓住关键词、逻辑关系、限制条件和真正追问？',
+        readingScore,
+        hasDraft
+          ? `命中题眼 ${hitTopicTerms}/${Math.max(topicPhrases.length, 1)}；${evidenceSentence(topicPhrases.map((term) => new RegExp(term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))), '题眼在正文中回扣不足。')}`
+          : topicLine,
+        hasDraft && readingScore < 68
+          ? '先改开头和每段首句，把题眼、设问和限制条件写回原题。'
+          : '立意形成后回头用原题逐项验一次，避免只抓一两个词就写。',
+        '问答(一)：准确把握题意'
+      ),
+      item(
+        'intent',
+        '二问：立意是否准、真、新',
+        '观点是否健康真实，是否在准确基础上有一点新意，而不是硬拗逆向？',
+        intentScore,
+        hasDraft
+          ? evidenceSentence([/(我认为|本文认为|由此可见|因此|并非|未必|前提|边界|条件|价值|意义)/], '中心判断还不够稳定。')
+          : `可选立意：${preview(analysis?.thesis || '先形成条件化中心观点。', 54)}`,
+        hasDraft && intentScore < 70
+          ? '把中心句改成“立场 + 条件 + 边界”的判断句，少用绝对化表态。'
+          : '新意要建立在合理准确之上，可用“条件、限度、反方回应”制造深度。',
+        '问答(二)：思想健康、感情真实、有新意'
+      ),
+      item(
+        'material',
+        '三问：材料是否为观点服务',
+        '材料是否恰当、鲜活、能被分析，而不是只堆名人和例子？',
+        materialScore,
+        hasDraft
+          ? `材料/引用信号 ${evidenceCount} 处，现实信号 ${realityCount} 处；${evidenceSentence([/(例如|比如|案例|数据显示|据统计|《|“)/], '暂未看到清晰材料句。')}`
+          : '准备材料时按“广、新、深”筛：生活观察、阅读积累、社会现实各留一类。',
+        hasDraft && materialScore < 68
+          ? '每个例子后补一句“这个材料为什么能证明我的判断”，材料少而准比多而散更重要。'
+          : '继续让材料进入分析链：观点 -> 材料 -> 机制解释 -> 回扣题目。',
+        '问答(三)：材料积累与运用'
+      ),
+      item(
+        'structure',
+        '四问：结构是否撑得住',
+        '文章是否有清晰骨架，能按内容需要组织，而不是机械套模板？',
+        structureScore,
+        hasDraft
+          ? `当前 ${paragraphs.length} 段，过渡信号 ${transitionCount} 处；${evidenceSentence([/(首先|其次|然而|因此|进一步|总之|归根结底)/], '结构标志不够明显。')}`
+          : '写前可先选“引-立-析-证-联-结”，再按题目调整为递进、对比或并列。',
+        hasDraft && structureScore < 70
+          ? '先补提纲：开头定题意，中段分层论证，后段反方/边界，结尾回题。'
+          : '结构不是装饰，下一步检查每段是否都在服务同一个中心。',
+        '问答(四)：结构完整严谨'
+      ),
+      item(
+        'hierarchy',
+        '五问：层次是否走得清',
+        '段与段、句与句之间是否有路，是否避免交叉、跳跃和一段到底？',
+        hierarchyScore,
+        hasDraft
+          ? `段落均分参考 ${avgParagraphScore || '--'}/100，逻辑/因果信号 ${reasonCount} 处；${evidenceSentence([/(因为|所以|因此|然而|进一步|此外|换言之|归根结底)/], '层次推进句还不够显眼。')}`
+          : '写前给每段写一句功能标签：界定、分析、例证、转折、回扣。',
+        hasDraft && hierarchyScore < 70
+          ? '给每段第一句加功能：本段回答什么问题；删掉与上一段重复的角度。'
+          : '保持“一个段落只完成一个推进动作”，让读者看得见思路的路标。',
+        '问答(五)：层次清楚、条理分明'
+      )
+    ]
+  };
+}
+
+function renderObFiveQuestionPanel(kit, options = {}) {
+  if (!kit || !Array.isArray(kit.items)) return '';
+  const heading = options.heading || 'OB高考作文问答五问';
+  const rows = kit.items.map((row) => `
+    <div class="flaw-row">
+      <div class="flaw-row-top"><span>${escapeHtml(row.title)}</span><strong>${escapeHtml(row.scoreText || row.status || '')}</strong></div>
+      <p><strong>追问</strong>：${escapeHtml(row.question)}</p>
+      <p><strong>证据/校准</strong>：${escapeHtml(row.evidence)}</p>
+      <p><strong>下一步</strong>：${escapeHtml(row.action)}</p>
+      <p class="agent-para-issues">${escapeHtml(row.source || kit.source || '')} · ${escapeHtml(row.status || '')}</p>
+    </div>
+  `).join('');
+  return `
+    <div class="agent-result-block ob-five-question-panel">
+      <h4>${escapeHtml(heading)}</h4>
+      <p class="agent-para-issues">${escapeHtml(options.intro || kit.summary || '')}</p>
+      <div class="score-grid">${rows}</div>
+    </div>
+  `;
+}
+
+function insertObFiveQuestionPanel(container, kit, options = {}) {
+  if (!container) return;
+  const html = renderObFiveQuestionPanel(kit, options);
+  if (!html) return;
+  const head = container.querySelector('.agent-result-head');
+  if (head) {
+    head.insertAdjacentHTML('afterend', html);
+  } else {
+    container.insertAdjacentHTML('afterbegin', html);
+  }
 }
 
 function renderAgentResult(analysis, container) {
   const tags = analysis.rankedCategories.map((c) => `<span class="agent-tag">${escapeHtml(CATEGORY_LABEL_MAP[c] || c)}</span>`).join('');
+  const obFiveQuestionBlock = renderObFiveQuestionPanel(analysis.obFiveQuestionKit, { heading: 'OB高考作文问答五问（写前校准）' });
   const lens = analysis.lensSuggestions.map((x) => `<li>${escapeHtml(x)}</li>`).join('');
   const outline = analysis.outline.map((x) => `<li>${escapeHtml(x)}</li>`).join('');
   const stances = (analysis.stanceOptions || []).map((s) => `
@@ -1164,6 +1450,7 @@ function renderAgentResult(analysis, container) {
       <h3>题目分析：${escapeHtml(analysis.topic)}</h3>
       <div class="agent-tags">${tags}<span class="agent-tag">题型：${escapeHtml(analysis.topicType.name)}</span></div>
     </div>
+    ${obFiveQuestionBlock}
     ${eightTrainingPanel}
     ${exampleGuidedBlock}
     ${methodGuidedBlock}
