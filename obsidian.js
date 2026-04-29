@@ -1550,6 +1550,162 @@ function renderObsidianTopicRecommendations(topic, panel) {
   `;
 }
 
+function getObsidianMoveLabel(key) {
+  const labels = {
+    definition: '概念界定',
+    transition: '转折推进',
+    mechanism: '机制解释',
+    boundary: '边界收束',
+    reality: '现实关联'
+  };
+  return labels[key] || key || '段落动作';
+}
+
+function buildObsidianTopicStudySignal(topic, analysis = null) {
+  const topicAnalysis = analysis || analyzeEssayTopic(topic);
+  const topicType = normalizeObsidianTopicTypeName(topicAnalysis?.topicType?.name || detectTopicType(topic).name);
+  const theme = inferObsidianThemeTag(topic, '');
+  const terms = dedupeArray([
+    ...(topicAnalysis?.topicPhrases || []),
+    ...extractTopicPhrases(topic),
+    ...extractObsidianMatchTerms(topic, '', topicAnalysis)
+  ])
+    .map((item) => String(item || '').trim())
+    .filter((item) => item.length >= 2 && !/请写|文章|谈谈|认识|思考|不少于|自拟/.test(item))
+    .slice(0, 8);
+  const raw = `${topic || ''}${topicType || ''}${theme || ''}`;
+  const moves = [];
+  if (/关系|辩证|仅仅|只是|是否|也有|有人/.test(raw)) moves.push('transition', 'boundary');
+  if (/价值|判断|标准|高下|认可|重要|意义/.test(raw)) moves.push('definition', 'mechanism', 'boundary');
+  if (/方法|路径|如何|怎么|实践|行动|作为/.test(raw)) moves.push('mechanism', 'reality');
+  if (/陌生|探索|创新|未来|技术|变化|世界/.test(raw)) moves.push('definition', 'mechanism', 'reality');
+  if (!moves.length) moves.push('definition', 'mechanism', 'boundary');
+  return {
+    analysis: topicAnalysis,
+    topicType,
+    theme,
+    terms,
+    moves: dedupeArray(moves).slice(0, 4)
+  };
+}
+
+function pickObsidianMoveEvidence(picks, moveKey) {
+  const rows = [];
+  (picks || []).forEach((essay) => {
+    (essay.paragraphDissection || []).forEach((row) => {
+      const keys = row.moveKeys || [];
+      const text = `${row.role || ''}${row.learnPoint || ''}${row.evidence || ''}${row.lead || ''}`;
+      const fallback = {
+        definition: /界定|概念|开篇|定向/.test(text),
+        transition: /转折|然而|诚然|另一面|辩证/.test(text),
+        mechanism: /机制|原因|为什么|证明|例证|分析/.test(text),
+        boundary: /边界|并非|不是|不能|条件|绝对/.test(text),
+        reality: /现实|当下|生活|社会|校园|时代/.test(text)
+      };
+      if (keys.includes(moveKey) || fallback[moveKey]) {
+        rows.push({ essay, row, score: Number(essay.matchScore || 0) + (keys.includes(moveKey) ? 18 : 6) });
+      }
+    });
+  });
+  return rows.sort((a, b) => b.score - a.score)[0] || null;
+}
+
+function renderObsidianTopicSignalBlock(signal, picks) {
+  const assets = getObsidianTeachingAssets();
+  const typeSupport = (picks || []).filter((essay) => getObsidianEntryTopicType(essay) === signal.topicType).length;
+  const themeSupport = (picks || []).filter((essay) => getObsidianEntryTheme(essay) === signal.theme).length;
+  const terms = signal.terms.map((term) => `<span class="agent-tag">${escapeHtml(term)}</span>`).join('');
+  const moves = signal.moves.map((move) => `<span class="agent-tag">${escapeHtml(getObsidianMoveLabel(move))}</span>`).join('');
+  return `
+    <div class="agent-result-block">
+      <h4>当前题目的 OB 画像</h4>
+      <p><strong>题型</strong>：${escapeHtml(signal.topicType || '未识别')}｜<strong>母题</strong>：${escapeHtml(signal.theme || '未识别')}</p>
+      <p><strong>题眼</strong></p>
+      <div class="agent-tags">${terms || '<span class="agent-tag">待补充题眼</span>'}</div>
+      <p><strong>优先学习动作</strong></p>
+      <div class="agent-tags">${moves}</div>
+      <p class="agent-para-issues">OB 库${assets?.total ? `已接入 ${assets.total} 篇教学资产，其中高分标杆 ${assets.highScoreCount || 0} 篇` : '教学资产暂未加载'}；本次推荐中同题型 ${typeSupport} 篇，同母题 ${themeSupport} 篇。</p>
+    </div>
+  `;
+}
+
+function renderObsidianMovePriorityBlock(signal, picks) {
+  const rows = signal.moves.map((move, index) => {
+    const hit = pickObsidianMoveEvidence(picks, move);
+    const essay = hit?.essay;
+    const row = hit?.row;
+    return `
+      <div class="flaw-row">
+        <div class="flaw-row-top">
+          <span>${index + 1}. ${escapeHtml(getObsidianMoveLabel(move))}</span>
+          <strong>${row ? `第${row.index || '?'}段` : '待匹配'}</strong>
+        </div>
+        <p><strong>看哪篇</strong>：${escapeHtml(essay?.title || '暂无强匹配范文')}</p>
+        <p><strong>看什么</strong>：${escapeHtml(row?.learnPoint || buildObsidianMoveTransferTip(move))}</p>
+        <p><strong>迁移提醒</strong>：${escapeHtml(buildObsidianMoveTransferTip(move))}</p>
+        ${essay ? `<button class="agent-btn ghost" type="button" data-ob-dissect-id="${escapeHtml(essay.id)}">解剖来源范文</button>` : ''}
+      </div>
+    `;
+  }).join('');
+  return `
+    <div class="agent-result-block">
+      <h4>动作优先级</h4>
+      <p class="agent-para-issues">先补动作，再看整篇。每次只迁移一个功能：界定、转折、机制、边界或现实关联。</p>
+      <div class="score-grid">${rows}</div>
+    </div>
+  `;
+}
+
+function renderObsidianTopicStudyPlan(topic, panel) {
+  if (!panel) return;
+  const signal = buildObsidianTopicStudySignal(topic);
+  const picks = recommendObsidianTeachingEssays(topic, 5);
+  if (!picks.length) {
+    renderObsidianTutorMessage(panel, '暂未匹配到合适的 OB 范文。可以把题目写完整一点，再生成训练路径。');
+    return;
+  }
+  const topCards = picks.slice(0, 3).map((essay, index) => {
+    const bestRow = pickBestParagraphToStudy(essay, topic);
+    const route = buildObsidianThreeStepStudyRoute(essay, topic);
+    const breakdown = buildObsidianRecommendationBreakdown(essay, topic, signal.analysis);
+    return `
+      <div class="flaw-row">
+        <div class="flaw-row-top">
+          <span>${index + 1}. ${escapeHtml(essay.title || 'OB范文')}</span>
+          <strong>匹配 ${Math.round(essay.matchScore || 0)}</strong>
+        </div>
+        <p><strong>档案</strong>：${escapeHtml(buildTeachingEssayMetaLine(essay))}</p>
+        <p><strong>推荐理由</strong>：${escapeHtml((essay.matchReasons || []).join('；') || '题型、母题或题眼接近。')}</p>
+        ${renderObsidianMatchBreakdown(breakdown)}
+        <p><strong>第一眼先看</strong>：第${bestRow?.index || 1}段，${escapeHtml(bestRow?.learnPoint || '看它如何承担段落功能。')}</p>
+        ${renderObsidianThreeStepRoute(route)}
+        <div class="agent-actions quiet-actions">
+          <button class="agent-btn ghost" type="button" data-ob-dissect-id="${escapeHtml(essay.id)}">解剖这篇</button>
+          <button class="agent-btn ghost" type="button" data-ob-task-id="${escapeHtml(essay.id)}">生成对照任务卡</button>
+        </div>
+      </div>
+    `;
+  }).join('');
+  const primary = picks[0];
+  panel.innerHTML = `
+    <div class="agent-result-block">
+      <h4>OB 训练路径</h4>
+      <p><strong>当前题目</strong>：${escapeHtml(topic)}</p>
+      <p class="agent-para-issues">这条路径不让学生抄范文，只让他完成三件事：定题眼、看段落功能、迁移一个高分动作。</p>
+      <div class="agent-actions quiet-actions">
+        <button class="agent-btn primary" type="button" data-ob-task-id="${escapeHtml(primary.id)}">用最匹配范文生成任务卡</button>
+        <button class="agent-btn ghost" type="button" data-ob-dissect-id="${escapeHtml(primary.id)}">解剖最匹配范文</button>
+      </div>
+    </div>
+    ${renderObsidianTopicSignalBlock(signal, picks)}
+    ${renderObsidianMovePriorityBlock(signal, picks)}
+    <div class="agent-result-block">
+      <h4>推荐范文与读法</h4>
+      <div class="score-grid">${topCards}</div>
+    </div>
+  `;
+}
+
 function renderObsidianParagraphPath(essay) {
   const rows = Array.isArray(essay?.paragraphDissection) ? essay.paragraphDissection : [];
   if (!rows.length) return '<p class="agent-empty">暂未拆出段落路径。</p>';

@@ -332,6 +332,7 @@ function initAgentWorkbench() {
   const exampleTrainingList = document.getElementById('exampleTrainingList');
   const obEssaySelect = document.getElementById('obEssaySelect');
   const obDissectBtn = document.getElementById('obDissectBtn');
+  const obTopicRouteBtn = document.getElementById('obTopicRouteBtn');
   const obRecommendBtn = document.getElementById('obRecommendBtn');
   const obActionTypeSelect = document.getElementById('obActionTypeSelect');
   const obActionBankBtn = document.getElementById('obActionBankBtn');
@@ -409,6 +410,11 @@ function initAgentWorkbench() {
     const topic = topicInput.value.trim();
     if (!topic) return void renderObsidianTutorMessage(obTutorPanel, '请先在上方输入作文题目，再推荐同题高分文。');
     renderObsidianTopicRecommendations(topic, obTutorPanel);
+  });
+  obTopicRouteBtn?.addEventListener('click', () => {
+    const topic = topicInput.value.trim();
+    if (!topic) return void renderObsidianTutorMessage(obTutorPanel, '请先在上方输入作文题目，再生成 OB 训练路径。');
+    renderObsidianTopicStudyPlan(topic, obTutorPanel);
   });
   obActionBankBtn?.addEventListener('click', () => {
     renderObsidianActionBank(obActionTypeSelect?.value || 'all', obTutorPanel);

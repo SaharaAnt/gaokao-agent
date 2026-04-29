@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;900&family=ZCOOL+KuaiLe&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="styles.css?v=60" />
+    <link rel="stylesheet" href="styles.css?v=61" />
 </head>
 <body>
   <div class="bg-particles" id="particles"></div>
@@ -130,10 +130,10 @@
         </div>
       </details>
 
-      <details class="workspace-step library-step" id="libraryWorkbenchStep">
+      <details class="workspace-step library-step" id="libraryWorkbenchStep" open>
         <summary>
           <span class="step-no">03</span>
-          <span><strong>范文与训练库</strong><em>需要对照时再打开，避免一上来分散注意力</em></span>
+          <span><strong>范文与训练库</strong><em>围绕 OB 范文做推荐、解剖与迁移训练</em></span>
         </summary>
         <div class="library-grid">
           <div class="essay-library">
@@ -155,6 +155,7 @@
           <div class="agent-actions quiet-actions">
             <select id="obEssaySelect" class="timeline-select" title="选择一篇OB范文"></select>
             <button id="obDissectBtn" class="agent-btn ghost" type="button">解剖这篇</button>
+            <button id="obTopicRouteBtn" class="agent-btn primary" type="button">生成OB训练路径</button>
             <button id="obRecommendBtn" class="agent-btn primary" type="button">按当前题目推荐3篇</button>
             <select id="obActionTypeSelect" class="timeline-select" title="高分动作类型">
               <option value="all">高分动作：全部</option>
@@ -241,9 +242,9 @@
     <script src="obsidian_index.js?v=2"></script>
     <script src="obsidian_teaching_assets.js?v=2"></script>
     <script src="ocr.js?v=1"></script>
-    <script src="obsidian.js?v=1"></script>
-    <script src="scoring.js?v=1"></script>
+    <script src="obsidian.js?v=2"></script>
+    <script src="scoring.js?v=2"></script>
     <script src="generation.js?v=1"></script>
-    <script src="app.js?v=82"></script>
+    <script src="app.js?v=83"></script>
 </body>
 </html>

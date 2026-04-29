@@ -738,6 +738,11 @@ body {
 .review-actions .agent-btn.ghost {
   background: rgba(255, 255, 255, 0.46);
 }
+.quiet-actions .agent-btn.primary {
+  color: #fffdf7;
+  background: #7d674a;
+  border-color: #7d674a;
+}
 .timeline-select,
 .material-input {
   border-color: rgba(112, 103, 88, 0.22);
