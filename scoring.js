@@ -1,4 +1,6 @@
 // Essay diagnosis, Shanghai scoring, teacher reports, and regression checks.
+const TRAINING_SCORE_MAX_70 = 65;
+
 const OB_SHANGHAI_SCORE_STANDARD = {
   source: 'OB《上海高考作文评分标准》',
   bands: {
@@ -2365,6 +2367,10 @@ function computeShanghaiOfficialScore({ originalDraft, draft, offTopic, intent, 
     finalScore = clamp(Number(sourceGrade.score || 0) + 1, 0, 70);
     adjustments.push('检测到资料原评，系统分数高于原评过多时自动收束到接近原评区间。');
   }
+  if (finalScore > TRAINING_SCORE_MAX_70) {
+    finalScore = TRAINING_SCORE_MAX_70;
+    adjustments.push(`训练评分上限：本系统当前用于修改训练，显示分最高控制在${TRAINING_SCORE_MAX_70}分；不否定资料原评或真实阅卷可能更高。`);
+  }
   const sourceComparison = sourceGrade ? {
     score: sourceGrade.score,
     label: sourceGrade.label,
@@ -2451,12 +2457,12 @@ function buildNetworkMarkingReviewSimulation(report) {
   const contentMapped = mapRubricQualityToShanghaiScore(contentQuality, wordCount);
   const expressionMapped = mapRubricQualityToShanghaiScore(expressionQuality, wordCount);
   const finalScore = Number(official.score || report.total70 || 0);
-  const contentScore = clamp(Math.round(contentMapped * 0.62 + finalScore * 0.38), 0, 70);
-  const expressionScore = clamp(Math.round(expressionMapped * 0.62 + finalScore * 0.38), 0, 70);
+  const contentScore = clamp(Math.round(contentMapped * 0.62 + finalScore * 0.38), 0, TRAINING_SCORE_MAX_70);
+  const expressionScore = clamp(Math.round(expressionMapped * 0.62 + finalScore * 0.38), 0, TRAINING_SCORE_MAX_70);
   const gap = Math.abs(contentScore - expressionScore);
   const triggerThirdReview = gap >= 6;
   const thirdScore = triggerThirdReview
-    ? clamp(Math.round(finalScore * 0.55 + ((contentScore + expressionScore) / 2) * 0.45), 0, 70)
+    ? clamp(Math.round(finalScore * 0.55 + ((contentScore + expressionScore) / 2) * 0.45), 0, TRAINING_SCORE_MAX_70)
     : finalScore;
   const sourceGap = Math.abs(Number(official.sourceComparison?.gap || 0));
   const riskExtra = /高/.test(String(report.offTopic?.riskLevel || '')) ? 2 : 0;
@@ -2472,7 +2478,7 @@ function buildNetworkMarkingReviewSimulation(report) {
     triggerThirdReview,
     scoreRange: {
       low: clamp(finalScore - uncertainty, 0, 70),
-      high: clamp(finalScore + uncertainty, 0, 70),
+      high: clamp(finalScore + uncertainty, 0, TRAINING_SCORE_MAX_70),
       uncertainty
     },
     comments: [
@@ -2987,6 +2993,7 @@ function renderTeacherOneScreenConclusion(report, mode = 'score') {
           <div class="flaw-row-top"><span>当前判定</span><strong>${report.total70}/70</strong></div>
           <p>${escapeHtml(report.officialScore?.band || report.intent?.band || '')}${report.officialScore?.bandLane ? `｜${escapeHtml(report.officialScore.bandLane)}` : ''}</p>
           <p>合理区间：${escapeHtml(rangeText)}｜${networkReview.triggerThirdReview ? '建议三评复核' : '双评差距可控'}</p>
+          <p>训练口径：当前系统最高显示${TRAINING_SCORE_MAX_70}分，重点服务修改与提档。</p>
           <p>资料原评：${escapeHtml(sourceGrade)}</p>
         </div>
         <div class="flaw-row">
@@ -4210,12 +4217,12 @@ async function runRegressionSuite() {
     ].join('\n');
     const draft = `以旧维新 生生不息（一类上 68分）\n\n曹杨二中 高三 石英娜\n\n${body}`;
     const report = await buildShanghaiTeacherReviewReport(topic, draft);
-    const ok = report.total70 >= 66
+    const ok = report.total70 === TRAINING_SCORE_MAX_70
       && report.officialScore?.sourceGrade?.score === 68
       && report.officialScore?.sourceComparison
       && report.offTopic?.expertSignals?.selfAxisScore >= 70
       && (report.offTopic.reviewInfo?.removedHeadings || []).length >= 2;
-    cases.push({ name: 'OB高分文独立复核', ok, detail: ok ? `识别原评${report.officialScore.sourceGrade.score}分，独立评分 ${report.total70}/70，自拟中心轴${report.offTopic.expertSignals.selfAxisScore}` : `复核不足：${report.total70}/70，原评 ${report.officialScore?.sourceGrade?.score || '未识别'}` });
+    cases.push({ name: 'OB高分文独立复核', ok, detail: ok ? `识别原评${report.officialScore.sourceGrade.score}分，训练口径封顶 ${report.total70}/70，自拟中心轴${report.offTopic.expertSignals.selfAxisScore}` : `复核不足：${report.total70}/70，原评 ${report.officialScore?.sourceGrade?.score || '未识别'}` });
   } catch (err) {
     cases.push({ name: 'OB高分文独立复核', ok: false, detail: `异常：${err?.message || '未知错误'}` });
   }
